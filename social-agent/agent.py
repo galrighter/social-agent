@@ -197,7 +197,11 @@ def generate_caption(record, extra_instructions=""):
 
     res = requests.post(
         "https://api.anthropic.com/v1/messages",
-        headers={"Content-Type": "application/json"},
+        headers={
+                "Content-Type": "application/json",
+                "x-api-key": CONFIG["ANTHROPIC_API_KEY"],
+                "anthropic-version": "2023-06-01"
+            },
         json={
             "model":      "claude-sonnet-4-20250514",
             "max_tokens": 1000,
@@ -236,7 +240,11 @@ def run_feedback_summary_flow():
 
     res = requests.post(
         "https://api.anthropic.com/v1/messages",
-        headers={"Content-Type": "application/json"},
+        headers={
+                "Content-Type": "application/json",
+                "x-api-key": CONFIG["ANTHROPIC_API_KEY"],
+                "anthropic-version": "2023-06-01"
+            },
         json={"model": "claude-sonnet-4-20250514", "max_tokens": 2000,
               "messages": [{"role": "user", "content": prompt}]}
     )
