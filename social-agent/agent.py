@@ -329,28 +329,38 @@ def _poll_for_summary_decision(proposed):
 # ─── Telegram ─────────────────────────────────────────────────────────────────
 
 def _send_telegram_photo(photo_url, caption, keyboard=None):
-    """שולח תמונה עם טקסט לטלגרם"""
-    payload = {
-        "chat_id": CONFIG["TELEGRAM_CHAT_ID"],
-        "photo":   photo_url,
-        "caption": caption,
-        "disable_notification": False
-    }
-    if keyboard:
-        payload["reply_markup"] = keyboard
+    """מוריד תמונה ושולח אותה לטלגרם כ-bytes"""
     try:
+        # הורד את התמונה
+        img_res = requests.get(photo_url, timeout=20)
+        if not img_res.ok:
+            log.error(f"לא הצלחתי להוריד תמונה לטלגרם: {img_res.status_code}")
+            _send_telegram_message(caption, keyboard)
+            return
+
+        # שלח כ-multipart
+        files = {"photo": ("image.jpg", img_res.content, "image/jpeg")}
+        data  = {
+            "chat_id": CONFIG["TELEGRAM_CHAT_ID"],
+            "caption": caption,
+        }
+        if keyboard:
+            import json as _json
+            data["reply_markup"] = _json.dumps(keyboard)
+
         res = requests.post(
             f"https://api.telegram.org/bot{CONFIG['TELEGRAM_BOT_TOKEN']}/sendPhoto",
-            json=payload
+            data=data,
+            files=files
         )
         if not res.ok:
             log.error(f"שגיאת שליחת תמונה {res.status_code}: {res.text}")
-            # fallback להודעת טקסט
             _send_telegram_message(caption, keyboard)
         else:
             log.info("תמונה נשלחה לטלגרם ✓")
     except Exception as e:
-        log.error(f"שגיאת טלגרם: {e}")
+        log.error(f"שגיאת שליחת תמונה: {e}")
+        _send_telegram_message(caption, keyboard)
 
 
 def _send_telegram_message(text, keyboard=None):
