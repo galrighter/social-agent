@@ -176,23 +176,22 @@ def generate_caption(record, extra_instructions=""):
     if notes:  job_desc.append(f"הערות: {notes}")
     job_text = " | ".join(job_desc) if job_desc else "עבודת צביעה באבקה"
 
-    caption_prompt = f"""אתה רואה תמונות לפני ואחרי של עבודת צביעה באבקה.
+    caption_prompt = f"""אתה כותב פוסט עבור Rightek — עסק לצביעה באבקה וניקוי חול.
 
 פרטי העבודה: {job_text}
-{f'הוראות ספציפיות לפוסט זה: {extra_instructions}' if extra_instructions else ''}
+{f'הוראות ספציפיות: {extra_instructions}' if extra_instructions else ''}
 
-כתוב קפשן בעברית לפוסט בפייסבוק/אינסטגרם.
+כתוב בדיוק 3 שורות, לפי המבנה הבא — ללא סטייה:
 
-חוקים מחייבים:
-✓ אורך: 60-100 מילים בדיוק — לא יותר, לא פחות
-✓ פתיחה: משפט אחד חזק שמתאר את התוצאה שנראית בתמונה
-✓ גוף: 2-3 משפטים על האיכות, העמידות, המקצועיות
-✓ סיום: קריאה לפעולה אחת ברורה (פנו אלינו / צרו קשר)
-✓ שורה נפרדת בסוף עם בדיוק 5 האשטאגים: #צביעהבאבקה #powdercoating #ציפוימתכות #גימורמקצועי #איכות
-✓ לא יותר מ-2 אמוג'י בכל הפוסט
-✓ טון מקצועי — לא קזואלי, לא מוגזם
+שורה 1: תיאור עובדתי של החלק, התהליך והגוון. (לדוגמה: "סט גאנטים אחרי ניקוי חול וצבע באבקה.")
+שורה 2: יתרון טכני אחד בלבד של הצביעה לחלק זה. (לדוגמה: "הצביעה עמידה יותר לשריטות מצביעה רגילה.")
+שורה 3: בדיוק כך ללא שינוי: "לפרטים ניתן ליצור קשר בווצאפ 054-6500543"
 
-החזר רק את הקפשן המוכן לפרסום, ללא הסברים."""
+שורה ריקה.
+5 האשטאגים הרלוונטיים לחלק ולתהליך, כולל #Rightek תמיד.
+
+אסור: מחמאות, סופרלטיבים, המילים "מדהים/מושלם/וואו/מהפך", אמוג'י, יותר מ-3 שורות.
+החזר רק את הפוסט המוכן."""
 
     # הורד תמונות
     before_b64 = get_image_b64_from_attachment(before_pics, "before")
@@ -206,10 +205,10 @@ def generate_caption(record, extra_instructions=""):
         content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": after_b64}})
     content.append({"type": "text", "text": caption_prompt})
 
-    if before_b64 or after_b64:
-        log.info(f"שולח {'2 תמונות' if before_b64 and after_b64 else 'תמונה אחת'} ל-Claude Vision")
-    else:
-        log.warning("אין תמונות — כותב קפשן לפי פרטים טקסטואליים בלבד")
+    if not before_b64 and not after_b64:
+        log.warning("אין תמונות — מדלג, לא מבזבז טוקנים")
+        raise ValueError("NO_IMAGES")
+    log.info(f"שולח {'2 תמונות' if before_b64 and after_b64 else 'תמונה אחת'} ל-Claude Vision")
 
     res = requests.post(
         "https://api.anthropic.com/v1/messages",
@@ -525,7 +524,13 @@ def run_publish_flow():
     # לולאת אישור
     attempt     = 1
     extra_notes = ""
-    caption     = generate_caption(record, extra_notes)
+    try:
+        caption = generate_caption(record, extra_notes)
+    except ValueError as e:
+        if "NO_IMAGES" in str(e):
+            _send_telegram_message("אין תמונות בשורה — הוסף תמונה באיירטייבל ונסה שוב.")
+            return
+        raise
 
     while True:
         send_approval_request(record, caption, attempt)
@@ -545,7 +550,13 @@ def run_publish_flow():
             else:
                 save_feedback(feedback)
                 extra_notes = feedback
-            caption = generate_caption(record, extra_notes)
+            try:
+                caption = generate_caption(record, extra_notes)
+            except ValueError as e:
+                if "NO_IMAGES" in str(e):
+                    _send_telegram_message("אין תמונות — לא ניתן לכתוב פוסט.")
+                    return
+                raise
             attempt += 1
 
     # פרסום — שימוש ב-after pic כתמונה הראשית
