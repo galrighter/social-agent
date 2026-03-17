@@ -118,19 +118,33 @@ def mark_as_skipped(record_id):
     log.info(f"שורה {record_id} דולגה ✓")
 
 def get_image_b64_from_attachment(attachments, label="תמונה"):
-    """מוריד את התמונה הראשונה מרשימת attachments ומחזיר base64"""
+    """
+    מוריד תמונה מ-attachment ומחזיר base64.
+    מעדיף thumbnail (תמיד JPEG) על פני קובץ מקורי (יכול להיות HEIF/WebP).
+    """
     if not attachments:
         return None
-    url = attachments[0].get("url")
-    if not url:
-        return None
-    try:
-        res = requests.get(url, timeout=20)
-        if res.ok and "image" in res.headers.get("Content-Type", ""):
-            log.info(f"הורדתי {label} ✓")
-            return base64.standard_b64encode(res.content).decode("utf-8")
-    except Exception as e:
-        log.warning(f"לא הצלחתי להוריד {label}: {e}")
+    att = attachments[0]
+
+    # נסה thumbnail גדול קודם — תמיד JPEG
+    thumb_url = att.get("thumbnails", {}).get("large", {}).get("url")
+    full_url  = att.get("url")
+    
+    for url in [thumb_url, full_url]:
+        if not url:
+            continue
+        try:
+            res = requests.get(url, timeout=20)
+            ct  = res.headers.get("Content-Type", "")
+            if res.ok and "image" in ct and "heif" not in ct and "heic" not in ct:
+                log.info(f"הורדתי {label} ✓ ({ct})")
+                return base64.standard_b64encode(res.content).decode("utf-8")
+            elif res.ok and ("heif" in ct or "heic" in ct):
+                log.warning(f"{label}: פורמט HEIF לא נתמך, מנסה thumbnail")
+        except Exception as e:
+            log.warning(f"לא הצלחתי להוריד {label} מ-{url}: {e}")
+    
+    log.warning(f"לא נמצאה תמונה תואמת עבור {label}")
     return None
 
 
@@ -167,16 +181,18 @@ def generate_caption(record, extra_instructions=""):
 פרטי העבודה: {job_text}
 {f'הוראות ספציפיות לפוסט זה: {extra_instructions}' if extra_instructions else ''}
 
-כתוב קפשן שיווקי בעברית שמתאר את התוצאה המרשימה.
+כתוב קפשן בעברית לפוסט בפייסבוק/אינסטגרם.
 
-דרישות:
-✓ 60-120 מילים
-✓ פתיחה חזקה שמתארת את השינוי/התוצאה
-✓ מדגיש את האיכות והמקצועיות
-✓ קריאה לפעולה בסוף
-✓ 4-6 האשטאגים רלוונטיים
+חוקים מחייבים:
+✓ אורך: 60-100 מילים בדיוק — לא יותר, לא פחות
+✓ פתיחה: משפט אחד חזק שמתאר את התוצאה שנראית בתמונה
+✓ גוף: 2-3 משפטים על האיכות, העמידות, המקצועיות
+✓ סיום: קריאה לפעולה אחת ברורה (פנו אלינו / צרו קשר)
+✓ שורה נפרדת בסוף עם בדיוק 5 האשטאגים: #צביעהבאבקה #powdercoating #ציפוימתכות #גימורמקצועי #איכות
+✓ לא יותר מ-2 אמוג'י בכל הפוסט
+✓ טון מקצועי — לא קזואלי, לא מוגזם
 
-החזר רק את הקפשן."""
+החזר רק את הקפשן המוכן לפרסום, ללא הסברים."""
 
     # הורד תמונות
     before_b64 = get_image_b64_from_attachment(before_pics, "before")
@@ -312,6 +328,31 @@ def _poll_for_summary_decision(proposed):
 
 # ─── Telegram ─────────────────────────────────────────────────────────────────
 
+def _send_telegram_photo(photo_url, caption, keyboard=None):
+    """שולח תמונה עם טקסט לטלגרם"""
+    payload = {
+        "chat_id": CONFIG["TELEGRAM_CHAT_ID"],
+        "photo":   photo_url,
+        "caption": caption,
+        "disable_notification": False
+    }
+    if keyboard:
+        payload["reply_markup"] = keyboard
+    try:
+        res = requests.post(
+            f"https://api.telegram.org/bot{CONFIG['TELEGRAM_BOT_TOKEN']}/sendPhoto",
+            json=payload
+        )
+        if not res.ok:
+            log.error(f"שגיאת שליחת תמונה {res.status_code}: {res.text}")
+            # fallback להודעת טקסט
+            _send_telegram_message(caption, keyboard)
+        else:
+            log.info("תמונה נשלחה לטלגרם ✓")
+    except Exception as e:
+        log.error(f"שגיאת טלגרם: {e}")
+
+
 def _send_telegram_message(text, keyboard=None):
     payload = {
         "chat_id": CONFIG["TELEGRAM_CHAT_ID"],
@@ -336,21 +377,36 @@ def send_approval_request(record, caption, attempt=1):
     attempt_txt = f" (ניסיון #{attempt})" if attempt > 1 else ""
 
     after_pics  = fields.get(CONFIG["FLD_AFTER_PIC"], [])
-    preview_url = after_pics[0].get("url", "") if after_pics else ""
+    before_pics = fields.get(CONFIG["FLD_BEFORE_PIC"], [])
+    primary     = after_pics or before_pics
+    if primary:
+        att = primary[0]
+        att_type = att.get("type", "")
+        if "heif" in att_type or "heic" in att_type:
+            image_url = att.get("thumbnails", {}).get("large", {}).get("url") or att.get("url", "")
+        else:
+            image_url = att.get("url", "")
+    else:
+        image_url = ""
 
     keyboard = {"inline_keyboard": [[
         {"text": "✅ אשר ופרסם",   "callback_data": f"approve_{record['id']}"},
         {"text": "❌ דלג על פוסט", "callback_data": f"skip_{record['id']}"}
     ]]}
 
-    _send_telegram_message(
-        f"📋 *קפשן לאישור{attempt_txt}*\n"
-        f"🔧 {items} | {color}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n{caption}\n━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"{'🖼 [תצוגה מקדימה](' + preview_url + ')' if preview_url else ''}\n\n"
-        f"✅ פרסם | ❌ דלג\nאו כתוב הוראות לתיקון הקפשן",
-        keyboard=keyboard
+    text = (
+        f"קפשן לאישור{attempt_txt}\n"
+        f"{items} | {color}\n\n"
+        f"---\n{caption}\n---\n\n"
+        f"✅ אשר ופרסם  |  ❌ דלג\n"
+        f"או כתוב הוראות לתיקון הקפשן"
     )
+
+    # שלח תמונה עם הקפשן כ-caption
+    if image_url:
+        _send_telegram_photo(image_url, text, keyboard)
+    else:
+        _send_telegram_message(text, keyboard)
 
 def poll_for_decision(record_id):
     """מחזיר: ('approve', None) | ('skip', None) | ('reject', feedback_text)"""
@@ -486,7 +542,18 @@ def run_publish_flow():
     fields      = record.get("fields", {})
     after_pics  = fields.get(CONFIG["FLD_AFTER_PIC"], [])
     before_pics = fields.get(CONFIG["FLD_BEFORE_PIC"], [])
-    image_url   = (after_pics or before_pics)[0]["url"] if (after_pics or before_pics) else None
+    primary_pics = after_pics or before_pics
+    if primary_pics:
+        att = primary_pics[0]
+        att_type = att.get("type", "")
+        # אם HEIF — השתמש ב-thumbnail
+        if "heif" in att_type or "heic" in att_type:
+            image_url = att.get("thumbnails", {}).get("large", {}).get("url") or att.get("url")
+            log.info("שימוש ב-thumbnail (קובץ מקורי HEIF)")
+        else:
+            image_url = att.get("url")
+    else:
+        image_url = None
 
     if not image_url:
         send_error_notification("לא נמצאה תמונה לפרסום בשורה הזו")
