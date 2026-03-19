@@ -566,7 +566,7 @@ def publish_photo_to_instagram(image_url, caption):
 # --- Main flow -----------------------------------------------------------------
 
 def run_publish_flow():
-    """Run publish flow with 2-minute timeout."""
+    """Run publish flow with 10-minute timeout (approval loop needs time)."""
     import threading
     error = [None]
 
@@ -578,10 +578,10 @@ def run_publish_flow():
 
     t = threading.Thread(target=_inner, daemon=True)
     t.start()
-    t.join(timeout=120)
+    t.join(timeout=600)
     if t.is_alive():
-        log.error("timeout - process stuck for 2+ minutes")
-        _send_telegram_message("Error: process stuck for 2+ minutes. Check Render logs.")
+        log.error("timeout - process stuck for 10+ minutes")
+        _send_telegram_message("Error: process stuck for 10+ minutes. Check Render logs.")
         return
     if error[0]:
         raise error[0]
