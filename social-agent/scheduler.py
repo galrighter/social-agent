@@ -1,7 +1,14 @@
 """
-מתזמן — פרסום יומי + האזנה לפקודות טלגרם
-פקודות: /newpost | /summarize | /status
+׳׳×׳–׳׳ ג€” ׳₪׳¨׳¡׳•׳ ׳™׳•׳׳™ + ׳”׳׳–׳ ׳” ׳׳₪׳§׳•׳“׳•׳× ׳˜׳׳’׳¨׳
+׳₪׳§׳•׳“׳•׳×: /newpost | /summarize | /status
 """
+import sys
+try:
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 import schedule
 import time
 import threading
@@ -22,14 +29,14 @@ def tg_send(text):
     try:
         requests.post(
             f"https://api.telegram.org/bot{CONFIG['TELEGRAM_BOT_TOKEN']}/sendMessage",
-            json={"chat_id": CONFIG["TELEGRAM_CHAT_ID"], "text": text, "parse_mode": "Markdown"}
+            json={"chat_id": CONFIG["TELEGRAM_CHAT_ID"], "text": text}
         )
     except Exception as e:
         log.warning(f"tg_send: {e}")
 
 def listen_for_commands():
     last_id = None
-    log.info("מאזין לפקודות טלגרם: /newpost | /summarize | /status")
+    log.info("listening for telegram commands: /newpost | /summarize | /status")
 
     while True:
         try:
@@ -47,13 +54,13 @@ def listen_for_commands():
                 text    = u.get("message", {}).get("text", "").strip()
 
                 if text == "/newpost":
-                    log.info("פקודת /newpost")
-                    tg_send("🎬 *יוצר פוסט לפי דרישה...*")
+                    log.info("command: /newpost")
+                    tg_send("creating post on demand...")
                     threading.Thread(target=run_publish_flow, daemon=True).start()
 
                 elif text == "/summarize":
-                    log.info("פקודת /summarize")
-                    tg_send("🔄 *מתחיל סיכום פידבקים...*")
+                    log.info("command: /summarize")
+                    tg_send("starting feedback summary...")
                     threading.Thread(target=run_feedback_summary_flow, daemon=True).start()
 
                 elif text == "/status":
@@ -62,11 +69,11 @@ def listen_for_commands():
                     unsummarized = data.get("unsummarized_count", 0)
                     has_summary  = bool(data.get("last_summary", ""))
                     tg_send(
-                        f"📊 *סטטוס סוכן*\n\n"
-                        f"פידבקים כולל: {total}\n"
-                        f"ממתינים לסיכום: {unsummarized}\n"
-                        f"יש סיכום קיים: {'כן ✓' if has_summary else 'לא'}\n\n"
-                        f"פקודות: /newpost | /summarize | /status"
+                        f"Agent status\n\n"
+                        f"Total feedbacks: {total}\n"
+                        f"Pending summary: {unsummarized}\n"
+                        f"Has summary: {'yes' if has_summary else 'no'}\n\n"
+                        f"Commands: /newpost | /summarize | /status"
                     )
 
         except Exception as e:
@@ -77,7 +84,7 @@ def listen_for_commands():
 if __name__ == "__main__":
     publish_time = f"{PUBLISH_HOUR_UTC:02d}:00"
     israel_hour  = (PUBLISH_HOUR_UTC + 3) % 24
-    log.info(f"סוכן פעיל — יפרסם כל יום ב-{publish_time} UTC ({israel_hour:02d}:00 ישראל)")
+    log.info(f"agent active ג€” publishing daily at {publish_time} UTC ({israel_hour:02d}:00 Israel)")
 
     schedule.every().day.at(publish_time).do(run)
 
