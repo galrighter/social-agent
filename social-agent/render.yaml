@@ -23,3 +23,10 @@ services:
         value: "6"
       - key: SUMMARIZE_AFTER_N_FEEDBACKS
         value: "10"
+      # ג”€ג”€ encoding ג€” fixes Hebrew in logs ג”€ג”€
+      - key: PYTHONIOENCODING
+        value: "utf-8"
+      - key: LANG
+        value: "C.UTF-8"
+      - key: LC_ALL
+        value: "C.UTF-8"
