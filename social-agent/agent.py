@@ -245,11 +245,7 @@ def generate_caption(record, extra_instructions="", before_b64=None, after_b64=N
 ׳׳¡׳•׳¨: ׳׳—׳׳׳•׳×, ׳¡׳•׳₪׳¨׳׳˜׳™׳‘׳™׳, ׳”׳׳™׳׳™׳ "׳׳“׳”׳™׳/׳׳•׳©׳׳/׳•׳•׳׳•/׳׳”׳₪׳", ׳׳׳•׳’'׳™, ׳™׳•׳×׳¨ ׳-3 ׳©׳•׳¨׳•׳×.
 ׳”׳—׳–׳¨ ׳¨׳§ ׳׳× ׳”׳₪׳•׳¡׳˜ ׳”׳׳•׳›׳."""
 
-    # ׳”׳•׳¨׳“ ׳×׳׳•׳ ׳•׳×
-    before_b64 = get_image_b64_from_attachment(before_pics, "before")
-    after_b64  = get_image_b64_from_attachment(after_pics,  "after")
-
-    # ׳‘׳ ׳” content ׳¢׳ ׳”׳×׳׳•׳ ׳•׳× ׳”׳–׳׳™׳ ׳•׳×
+    # ׳‘׳ ׳” content ׳¢׳ ׳”׳×׳׳•׳ ׳•׳× ׳©׳”׳•׳¢׳‘׳¨׳•
     content = []
     if before_b64:
         content.append({"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": before_b64}})
