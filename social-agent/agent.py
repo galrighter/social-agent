@@ -3,12 +3,17 @@
 Airtable ג†’ Claude Vision ג†’ Facebook + Instagram ג†’ Telegram ׳׳׳™׳©׳•׳¨
 """
 
+import sys
 import json
 import base64
 import logging
 import requests
 import time
 from datetime import datetime
+
+# ׳›׳•׳₪׳” UTF-8 ׳¢׳ stdout/stderr ג€” ׳₪׳•׳×׳¨ ׳¢׳‘׳¨׳™׳× ׳‘׳׳•׳’׳™׳ ׳©׳ Render
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
 from config import (CONFIG, FEEDBACK_FILE, BRAND_VOICE_FILE,
                     SUMMARIZE_AFTER_N_FEEDBACKS)
 
@@ -96,10 +101,12 @@ def fetch_ready_record():
     record = records[0]
     log.info(f"׳ ׳׳¦׳׳” ׳©׳•׳¨׳”: {record['id']}")
 
-    # ׳”׳•׳¨׳“ ׳×׳׳•׳ ׳•׳× ׳׳™׳“ ׳׳₪׳ ׳™ ׳©׳”-URLs ׳₪׳•׳§׳¢׳™׳
-    fields     = record.get("fields", {})
-    before_b64 = _download_attachment_b64(fields.get(CONFIG["FLD_BEFORE_PIC"], []), "before")
-    after_b64  = _download_attachment_b64(fields.get(CONFIG["FLD_AFTER_PIC"],  []), "after")
+    # ׳©׳׳•׳£ URLs ׳˜׳¨׳™׳™׳ ׳™׳©׳¨ ׳׳₪׳ ׳™ ׳”׳•׳¨׳“׳” (signed URLs ׳₪׳•׳§׳¢׳™׳)
+    record_id      = record["id"]
+    before_atts    = _refetch_fresh_attachments(record_id, CONFIG["FLD_BEFORE_PIC"])
+    after_atts     = _refetch_fresh_attachments(record_id, CONFIG["FLD_AFTER_PIC"])
+    before_b64     = _download_attachment_b64(before_atts, "before")
+    after_b64      = _download_attachment_b64(after_atts,  "after")
     return record, before_b64, after_b64
 
 
@@ -116,15 +123,31 @@ def _download_attachment_b64(attachments, label):
         url = att.get("url")
     if not url:
         return None
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; SocialAgent/1.0)"}
     try:
-        r = requests.get(url, timeout=20)
+        r = requests.get(url, timeout=20, headers=headers)
         log.info(f"{label}: status={r.status_code}, type={r.headers.get('Content-Type','?')}, size={len(r.content)}")
         if r.ok and len(r.content) > 1000:
             return base64.standard_b64encode(r.content).decode("utf-8")
-        log.warning(f"{label}: ׳”׳•׳¨׳“׳” ׳ ׳›׳©׳׳”")
+        log.warning(f"{label}: ׳”׳•׳¨׳“׳” ׳ ׳›׳©׳׳” ג€” {r.status_code}: {r.text[:200]}")
     except Exception as e:
         log.warning(f"{label}: {e}")
     return None
+
+
+def _refetch_fresh_attachments(record_id, field_id):
+    """׳©׳•׳׳£ attachment URLs ׳˜׳¨׳™׳™׳ ׳™׳©׳™׳¨׳•׳× ׳׳₪׳ ׳™ ׳”׳•׳¨׳“׳”"""
+    try:
+        res = requests.get(
+            f"{AIRTABLE_BASE}/{record_id}",
+            headers=AIRTABLE_HEADERS,
+            timeout=10
+        )
+        if res.ok:
+            return res.json().get("fields", {}).get(field_id, [])
+    except Exception as e:
+        log.warning(f"re-fetch ׳ ׳›׳©׳: {e}")
+    return []
 
 def mark_as_published(record_id):
     """׳׳¡׳׳ ׳׳× ׳”׳©׳•׳¨׳” ׳›-׳₪׳•׳¨׳¡׳=true ׳‘׳׳™׳™׳¨׳˜׳™׳™׳‘׳"""
