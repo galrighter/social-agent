@@ -79,17 +79,13 @@ def fetch_ready_record():
     ׳׳—׳–׳™׳¨ ׳׳× ׳”׳¨׳©׳•׳׳”, ׳׳• None ׳׳ ׳׳™׳.
     """
     log.info("׳׳—׳₪׳© ׳©׳•׳¨׳” ׳׳•׳›׳ ׳” ׳׳₪׳¨׳¡׳•׳ ׳‘׳׳™׳™׳¨׳˜׳™׳™׳‘׳...")
+    # ׳©׳™׳׳•׳© ׳‘-field IDs ׳‘׳׳§׳•׳ ׳©׳׳•׳× ׳¢׳‘׳¨׳™׳™׳ ג€” ׳׳•׳ ׳¢ ׳‘׳¢׳™׳•׳× URL encoding
+    ready_id     = CONFIG["FLD_READY"]
+    published_id = CONFIG["FLD_PUBLISHED"]
     params = {
-        "filterByFormula": f"AND({{{CONFIG['FLD_READY']}}}=1, {{{CONFIG['FLD_PUBLISHED']}}}=0)",
+        "filterByFormula": f"AND({{{ready_id}}}=1, NOT({{{published_id}}}))",
         "maxRecords": 1,
-        "sort[0][field]": "Created",
-        "sort[0][direction]": "asc"
-    }
-    # Airtable REST API - use field names not IDs in filterByFormula
-    params = {
-        "filterByFormula": "AND({׳׳•׳›׳ ׳׳₪׳¨׳¡׳•׳}=1, {׳₪׳•׳¨׳¡׳}=0)",
-        "maxRecords": 1,
-        "sort[0][field]": "Created",
+        "sort[0][field]": CONFIG["FLD_READY"],
         "sort[0][direction]": "asc"
     }
     res = requests.get(AIRTABLE_BASE, headers=AIRTABLE_HEADERS, params=params, timeout=15)
