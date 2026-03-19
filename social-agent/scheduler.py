@@ -1,6 +1,6 @@
 """
-׳׳×׳–׳׳ ג€” ׳₪׳¨׳¡׳•׳ ׳™׳•׳׳™ + ׳”׳׳–׳ ׳” ׳׳₪׳§׳•׳“׳•׳× ׳˜׳׳’׳¨׳
-׳₪׳§׳•׳“׳•׳×: /newpost | /summarize | /status
+Scheduler - daily publish + Telegram command listener
+Commands: /newpost | /summarize | /status
 """
 import sys
 try:
@@ -43,7 +43,7 @@ def listen_for_commands():
             params = {"timeout": 30, "allowed_updates": ["message"]}
             if last_id:
                 params["offset"] = last_id + 1
-            res     = requests.get(
+            res = requests.get(
                 f"https://api.telegram.org/bot{CONFIG['TELEGRAM_BOT_TOKEN']}/getUpdates",
                 params=params, timeout=35
             )
@@ -55,12 +55,12 @@ def listen_for_commands():
 
                 if text == "/newpost":
                     log.info("command: /newpost")
-                    tg_send("creating post on demand...")
+                    tg_send("Creating post on demand...")
                     threading.Thread(target=run_publish_flow, daemon=True).start()
 
                 elif text == "/summarize":
                     log.info("command: /summarize")
-                    tg_send("starting feedback summary...")
+                    tg_send("Starting feedback summary...")
                     threading.Thread(target=run_feedback_summary_flow, daemon=True).start()
 
                 elif text == "/status":
@@ -84,7 +84,7 @@ def listen_for_commands():
 if __name__ == "__main__":
     publish_time = f"{PUBLISH_HOUR_UTC:02d}:00"
     israel_hour  = (PUBLISH_HOUR_UTC + 3) % 24
-    log.info(f"agent active ג€” publishing daily at {publish_time} UTC ({israel_hour:02d}:00 Israel)")
+    log.info(f"agent active - publishing daily at {publish_time} UTC ({israel_hour:02d}:00 Israel)")
 
     schedule.every().day.at(publish_time).do(run)
 
