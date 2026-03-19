@@ -75,11 +75,10 @@ def save_feedback(text):
 
 def fetch_ready_record():
     """
-    ׳©׳•׳׳£ ׳©׳•׳¨׳” ׳׳—׳× ׳©׳׳•׳›׳ ׳” ׳׳₪׳¨׳¡׳•׳ ׳•׳׳ ׳₪׳•׳¨׳¡׳׳” ׳¢׳“׳™׳™׳.
-    ׳׳—׳–׳™׳¨ ׳׳× ׳”׳¨׳©׳•׳׳”, ׳׳• None ׳׳ ׳׳™׳.
+    ׳©׳•׳׳£ ׳©׳•׳¨׳” ׳׳•׳›׳ ׳” ׳׳₪׳¨׳¡׳•׳ ׳•׳׳•׳¨׳™׳“ ׳×׳׳•׳ ׳•׳× ׳׳™׳“.
+    ׳׳—׳–׳™׳¨ (record, before_b64, after_b64) ג€” ׳”-URLs ׳₪׳•׳§׳¢׳™׳ ׳׳”׳¨.
     """
     log.info("׳׳—׳₪׳© ׳©׳•׳¨׳” ׳׳•׳›׳ ׳” ׳׳₪׳¨׳¡׳•׳ ׳‘׳׳™׳™׳¨׳˜׳™׳™׳‘׳...")
-    # ׳©׳™׳׳•׳© ׳‘-field IDs ׳‘׳׳§׳•׳ ׳©׳׳•׳× ׳¢׳‘׳¨׳™׳™׳ ג€” ׳׳•׳ ׳¢ ׳‘׳¢׳™׳•׳× URL encoding
     ready_id     = CONFIG["FLD_READY"]
     published_id = CONFIG["FLD_PUBLISHED"]
     params = {
@@ -93,10 +92,39 @@ def fetch_ready_record():
     records = res.json().get("records", [])
     if not records:
         log.info("׳׳™׳ ׳©׳•׳¨׳•׳× ׳׳•׳›׳ ׳•׳× ׳׳₪׳¨׳¡׳•׳")
-        return None
+        return None, None, None
     record = records[0]
     log.info(f"׳ ׳׳¦׳׳” ׳©׳•׳¨׳”: {record['id']}")
-    return record
+
+    # ׳”׳•׳¨׳“ ׳×׳׳•׳ ׳•׳× ׳׳™׳“ ׳׳₪׳ ׳™ ׳©׳”-URLs ׳₪׳•׳§׳¢׳™׳
+    fields     = record.get("fields", {})
+    before_b64 = _download_attachment_b64(fields.get(CONFIG["FLD_BEFORE_PIC"], []), "before")
+    after_b64  = _download_attachment_b64(fields.get(CONFIG["FLD_AFTER_PIC"],  []), "after")
+    return record, before_b64, after_b64
+
+
+def _download_attachment_b64(attachments, label):
+    """׳׳•׳¨׳™׳“ attachment ׳•׳׳—׳–׳™׳¨ base64"""
+    if not attachments:
+        return None
+    att      = attachments[0]
+    att_type = att.get("type", "")
+    if "heif" in att_type or "heic" in att_type:
+        url = att.get("thumbnails", {}).get("large", {}).get("url") or att.get("url")
+        log.info(f"{label}: HEIF ג€” ׳׳©׳×׳׳© ׳‘-thumbnail")
+    else:
+        url = att.get("url")
+    if not url:
+        return None
+    try:
+        r = requests.get(url, timeout=20)
+        log.info(f"{label}: status={r.status_code}, type={r.headers.get('Content-Type','?')}, size={len(r.content)}")
+        if r.ok and len(r.content) > 1000:
+            return base64.standard_b64encode(r.content).decode("utf-8")
+        log.warning(f"{label}: ׳”׳•׳¨׳“׳” ׳ ׳›׳©׳׳”")
+    except Exception as e:
+        log.warning(f"{label}: {e}")
+    return None
 
 def mark_as_published(record_id):
     """׳׳¡׳׳ ׳׳× ׳”׳©׳•׳¨׳” ׳›-׳₪׳•׳¨׳¡׳=true ׳‘׳׳™׳™׳¨׳˜׳™׳™׳‘׳"""
@@ -153,19 +181,17 @@ def get_image_b64_from_attachment(attachments, label="׳×׳׳•׳ ׳”"):
 
 # ג”€ג”€ג”€ Claude AI ג€” Vision + Caption ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€ג”€
 
-def generate_caption(record, extra_instructions=""):
+def generate_caption(record, extra_instructions="", before_b64=None, after_b64=None):
     """
     ׳›׳•׳×׳‘ ׳§׳₪׳©׳ ׳‘׳”׳×׳‘׳¡׳¡ ׳¢׳ ׳×׳׳•׳ ׳•׳× ׳׳₪׳ ׳™/׳׳—׳¨׳™ + ׳₪׳¨׳˜׳™ ׳”׳¢׳‘׳•׳“׳”.
+    ׳׳§׳‘׳ ׳×׳׳•׳ ׳•׳× ׳™׳©׳™׳¨׳•׳× ׳›-base64 (׳”׳•׳¨׳“׳• ׳›׳‘׳¨ ׳‘-fetch_ready_record).
     """
     log.info("׳™׳•׳¦׳¨ ׳§׳₪׳©׳ ׳¢׳ Claude Vision...")
 
-    fields        = record.get("fields", {})
-    client        = fields.get(CONFIG["FLD_CLIENT"], "")
-    items         = fields.get(CONFIG["FLD_ITEMS"], "")
-    color         = fields.get(CONFIG["FLD_COLOR"], "")
-    notes         = fields.get(CONFIG["FLD_NOTES"], "")
-    before_pics   = fields.get(CONFIG["FLD_BEFORE_PIC"], [])
-    after_pics    = fields.get(CONFIG["FLD_AFTER_PIC"], [])
+    fields = record.get("fields", {})
+    items  = fields.get(CONFIG["FLD_ITEMS"], "")
+    color  = fields.get(CONFIG["FLD_COLOR"], "")
+    notes  = fields.get(CONFIG["FLD_NOTES"], "")
 
     brand_voice    = load_brand_voice()
     feedback_notes = load_feedback_for_caption()
@@ -537,20 +563,21 @@ def run_publish_flow():
 
 
 def _run_publish_flow_inner():
-    record = fetch_ready_record()
+    record, before_b64, after_b64 = fetch_ready_record()
 
     if not record:
-        _send_telegram_message(
-            "נ“­ *׳׳™׳ ׳₪׳•׳¡׳˜׳™׳ ׳׳•׳›׳ ׳™׳ ׳׳₪׳¨׳¡׳•׳*\n\n"
-            "׳¡׳׳ ׳©׳•׳¨׳” ׳›-'׳׳•׳›׳ ׳׳₪׳¨׳¡׳•׳' ׳‘׳׳™׳™׳¨׳˜׳™׳™׳‘׳ ׳›׳“׳™ ׳׳”׳×׳—׳™׳."
-        )
+        _send_telegram_message("׳׳™׳ ׳₪׳•׳¡׳˜׳™׳ ׳׳•׳›׳ ׳™׳ ׳׳₪׳¨׳¡׳•׳. ׳¡׳׳ ׳©׳•׳¨׳” ׳›׳׳•׳›׳ ׳׳₪׳¨׳¡׳•׳ ׳‘׳׳™׳™׳¨׳˜׳™׳™׳‘׳.")
+        return
+
+    if not before_b64 and not after_b64:
+        _send_telegram_message("׳׳™׳ ׳×׳׳•׳ ׳•׳× ׳‘׳©׳•׳¨׳” ג€” ׳”׳•׳¡׳£ ׳×׳׳•׳ ׳× ׳׳₪׳ ׳™/׳׳—׳¨׳™ ׳‘׳׳™׳™׳¨׳˜׳™׳™׳‘׳ ׳•׳ ׳¡׳” ׳©׳•׳‘.")
         return
 
     # ׳׳•׳׳׳× ׳׳™׳©׳•׳¨
     attempt     = 1
     extra_notes = ""
     try:
-        caption = generate_caption(record, extra_notes)
+        caption = generate_caption(record, extra_notes, before_b64, after_b64)
     except ValueError as e:
         if "NO_IMAGES" in str(e):
             _send_telegram_message("׳׳™׳ ׳×׳׳•׳ ׳•׳× ׳‘׳©׳•׳¨׳” ג€” ׳”׳•׳¡׳£ ׳×׳׳•׳ ׳” ׳‘׳׳™׳™׳¨׳˜׳™׳™׳‘׳ ׳•׳ ׳¡׳” ׳©׳•׳‘.")
@@ -576,7 +603,7 @@ def _run_publish_flow_inner():
                 save_feedback(feedback)
                 extra_notes = feedback
             try:
-                caption = generate_caption(record, extra_notes)
+                caption = generate_caption(record, extra_notes, before_b64, after_b64)
             except ValueError as e:
                 if "NO_IMAGES" in str(e):
                     _send_telegram_message("׳׳™׳ ׳×׳׳•׳ ׳•׳× ג€” ׳׳ ׳ ׳™׳×׳ ׳׳›׳×׳•׳‘ ׳₪׳•׳¡׳˜.")
