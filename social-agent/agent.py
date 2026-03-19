@@ -132,15 +132,22 @@ def get_image_b64_from_attachment(attachments, label="׳×׳׳•׳ ׳”"):
         try:
             res = requests.get(url, timeout=20)
             ct  = res.headers.get("Content-Type", "")
-            if res.ok and "image" in ct and "heif" not in ct and "heic" not in ct:
-                log.info(f"׳”׳•׳¨׳“׳×׳™ {label} ג“ ({ct})")
-                return base64.standard_b64encode(res.content).decode("utf-8")
-            elif res.ok and ("heif" in ct or "heic" in ct):
-                log.warning(f"{label}: ׳₪׳•׳¨׳׳˜ HEIF ׳׳ ׳ ׳×׳׳, ׳׳ ׳¡׳” thumbnail")
+            log.info(f"{label}: status={res.status_code}, content-type={ct}, size={len(res.content)}")
+            if not res.ok:
+                log.warning(f"{label}: HTTP {res.status_code}")
+                continue
+            if "heif" in ct or "heic" in ct:
+                log.warning(f"{label}: HEIF ג€” ׳׳ ׳¡׳” thumbnail")
+                continue
+            if len(res.content) < 1000:
+                log.warning(f"{label}: ׳×׳’׳•׳‘׳” ׳§׳¦׳¨׳” ׳׳“׳™ ({len(res.content)} bytes)")
+                continue
+            log.info(f"׳”׳•׳¨׳“׳×׳™ {label} ג“")
+            return base64.standard_b64encode(res.content).decode("utf-8")
         except Exception as e:
-            log.warning(f"׳׳ ׳”׳¦׳׳—׳×׳™ ׳׳”׳•׳¨׳™׳“ {label} ׳-{url}: {e}")
+            log.warning(f"׳©׳’׳™׳׳× ׳”׳•׳¨׳“׳” {label}: {e}")
     
-    log.warning(f"׳׳ ׳ ׳׳¦׳׳” ׳×׳׳•׳ ׳” ׳×׳•׳׳׳× ׳¢׳‘׳•׳¨ {label}")
+    log.warning(f"׳׳ ׳ ׳׳¦׳׳” ׳×׳׳•׳ ׳” ׳¢׳‘׳•׳¨ {label}")
     return None
 
 
