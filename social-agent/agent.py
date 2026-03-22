@@ -1,14 +1,10 @@
 """
-Social media publishing agent - v20
-Airtable -> Claude Vision -> Facebook + Instagram -> Telegram approval
+סוכן פרסום אוטומטי — v22 (bank mode + publishing controls)
+Airtable → Claude Vision → Telegram approval → save caption → publish later
 
-Changes from v19:
-- CRITICAL FIX: returnFieldsByFieldId=true on all Airtable API calls
-- Encoding fix: LANG/LC_ALL + reconfigure
-- Removed duplicate get_image_b64_from_attachment
-- All logs/comments in English (Hebrew only in prompts and UI)
-- Fresh URL fetch before publish (signed URLs expire during approval wait)
-- Changed one-time feedback prefix from Hebrew to English: "now:"
+PREPARE flow: /newpost → generate captions, get approval, save to Airtable
+PUBLISH flow: daily at scheduled time (or /publish) → take approved caption, publish to FB+IG
+CONTROLS: /pause, /resume, /skip, /next, /bank, /status
 """
 
 import sys
@@ -20,7 +16,6 @@ import requests
 import time
 from datetime import datetime
 
-# Force UTF-8 on stdout/stderr
 try:
     sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     sys.stderr.reconfigure(encoding='utf-8', errors='replace')
@@ -43,8 +38,28 @@ AIRTABLE_HEADERS = {
     "Content-Type": "application/json"
 }
 
+FLD_APPROVED_CAPTION = "fldVvsn0k69LcSnGz"
+PAUSE_FLAG_FILE = "paused.flag"
+LOW_BANK_THRESHOLD = 2  # warn when bank drops to this many posts
 
-# --- Data files ---------------------------------------------------------------
+
+# ─── Publishing controls ──────────────────────────────────────────────────────
+
+def is_paused():
+    return os.path.exists(PAUSE_FLAG_FILE)
+
+def set_paused(paused):
+    if paused:
+        with open(PAUSE_FLAG_FILE, "w") as f:
+            f.write(datetime.now().isoformat())
+        log.info("publishing PAUSED")
+    else:
+        if os.path.exists(PAUSE_FLAG_FILE):
+            os.remove(PAUSE_FLAG_FILE)
+        log.info("publishing RESUMED")
+
+
+# ─── Data files ───────────────────────────────────────────────────────────────
 
 def load_json(path, default):
     if os.path.exists(path):
@@ -63,7 +78,6 @@ def load_brand_voice():
     return ""
 
 def load_feedback_for_caption():
-    """Load feedback context to inject into caption prompt."""
     data         = load_json(FEEDBACK_FILE, {"feedbacks": [], "last_summary": "", "unsummarized_count": 0})
     last_summary = data.get("last_summary", "")
     unsummarized = [fb for fb in data.get("feedbacks", []) if not fb.get("summarized")]
@@ -71,15 +85,14 @@ def load_feedback_for_caption():
         return ""
     parts = []
     if last_summary:
-        parts.append(f"## learned principles from previous feedback:\n{last_summary}")
+        parts.append(f"## עקרונות שנלמדו מפידבק קודם:\n{last_summary}")
     if unsummarized:
-        parts.append("## unsummarized feedbacks:")
+        parts.append("## פידבקים שטרם סוכמו:")
         for fb in unsummarized:
             parts.append(f"- {fb['date']}: {fb['feedback']}")
     return "\n\n".join(parts)
 
 def save_feedback(text):
-    """Save rejection feedback and auto-trigger summary if threshold reached."""
     data = load_json(FEEDBACK_FILE, {"feedbacks": [], "last_summary": "", "unsummarized_count": 0})
     data["feedbacks"].append({"date": datetime.now().strftime("%Y-%m-%d"), "feedback": text, "summarized": False})
     data["unsummarized_count"] = data.get("unsummarized_count", 0) + 1
@@ -89,72 +102,89 @@ def save_feedback(text):
         run_feedback_summary_flow()
 
 
-# --- Airtable -----------------------------------------------------------------
+# ─── Airtable ─────────────────────────────────────────────────────────────────
 
-def fetch_ready_record():
-    """
-    Fetch one record where ready=true and published=false.
-    Downloads images immediately (signed URLs expire fast).
-    Returns (record, before_b64, after_b64).
-    """
-    log.info("searching Airtable for ready record...")
-    ready_id     = CONFIG["FLD_READY"]
-    published_id = CONFIG["FLD_PUBLISHED"]
-    params = {
-        "filterByFormula": f"AND({{{ready_id}}}=1, NOT({{{published_id}}}))",
-        "maxRecords": 1,
-        "sort[0][field]": ready_id,
-        "sort[0][direction]": "asc",
-        "returnFieldsByFieldId": "true"
-    }
-    res = requests.get(AIRTABLE_BASE, headers=AIRTABLE_HEADERS, params=params, timeout=15)
+def _airtable_get(url, params=None):
+    if params is None:
+        params = {}
+    params["returnFieldsByFieldId"] = "true"
+    res = requests.get(url, headers=AIRTABLE_HEADERS, params=params, timeout=15)
     res.raise_for_status()
-    records = res.json().get("records", [])
+    return res.json()
+
+
+def fetch_record_for_preparation():
+    log.info("searching for record needing caption...")
+    params = {
+        "filterByFormula": f"AND({{{CONFIG['FLD_READY']}}}=1, NOT({{{CONFIG['FLD_PUBLISHED']}}}), {{{FLD_APPROVED_CAPTION}}}='')",
+        "maxRecords": 1,
+        "sort[0][field]": CONFIG["FLD_READY"],
+        "sort[0][direction]": "asc"
+    }
+    data = _airtable_get(AIRTABLE_BASE, params)
+    records = data.get("records", [])
     if not records:
-        log.info("no ready records found")
+        log.info("no records needing captions")
         return None, None, None
     record = records[0]
-    log.info(f"found record: {record['id']}")
+    log.info(f"found record for preparation: {record['id']}")
 
-    field_keys = list(record.get("fields", {}).keys())
-    log.info(f"record fields: {field_keys}")
-
-    record_id   = record["id"]
-    before_atts = _refetch_fresh_attachments(record_id, CONFIG["FLD_BEFORE_PIC"])
-    after_atts  = _refetch_fresh_attachments(record_id, CONFIG["FLD_AFTER_PIC"])
-
-    log.info(f"before attachments: {len(before_atts)}, after attachments: {len(after_atts)}")
+    before_atts = _refetch_fresh_attachments(record["id"], CONFIG["FLD_BEFORE_PIC"])
+    after_atts  = _refetch_fresh_attachments(record["id"], CONFIG["FLD_AFTER_PIC"])
+    log.info(f"before: {len(before_atts)} attachments, after: {len(after_atts)} attachments")
 
     before_b64 = _download_attachment_b64(before_atts, "before")
     after_b64  = _download_attachment_b64(after_atts,  "after")
     return record, before_b64, after_b64
 
 
-def _refetch_fresh_attachments(record_id, field_id):
-    """Fetch fresh attachment URLs for a specific field."""
+def fetch_record_for_publishing():
+    log.info("searching for record ready to publish...")
+    params = {
+        "filterByFormula": f"AND({{{FLD_APPROVED_CAPTION}}}!='', {{{FLD_APPROVED_CAPTION}}}!='[דולג]', NOT({{{CONFIG['FLD_PUBLISHED']}}}), {{{CONFIG['FLD_READY']}}}=1)",
+        "maxRecords": 1,
+        "sort[0][field]": CONFIG["FLD_READY"],
+        "sort[0][direction]": "asc"
+    }
+    data = _airtable_get(AIRTABLE_BASE, params)
+    records = data.get("records", [])
+    if not records:
+        log.info("no approved posts waiting to be published")
+        return None
+    record = records[0]
+    log.info(f"found record for publishing: {record['id']}")
+    return record
+
+
+def count_bank():
     try:
-        res = requests.get(
-            f"{AIRTABLE_BASE}/{record_id}",
-            headers=AIRTABLE_HEADERS,
-            params={"returnFieldsByFieldId": "true"},
-            timeout=10
-        )
-        if res.ok:
-            atts = res.json().get("fields", {}).get(field_id, [])
-            if atts:
-                log.info(f"refetch {field_id}: got {len(atts)} attachment(s), type={atts[0].get('type','?')}")
-            else:
-                log.warning(f"refetch {field_id}: empty")
-            return atts
+        params = {
+            "filterByFormula": f"AND({{{FLD_APPROVED_CAPTION}}}!='', {{{FLD_APPROVED_CAPTION}}}!='[דולג]', NOT({{{CONFIG['FLD_PUBLISHED']}}}), {{{CONFIG['FLD_READY']}}}=1)",
+            "returnFieldsByFieldId": "true",
+            "pageSize": 100
+        }
+        res = requests.get(AIRTABLE_BASE, headers=AIRTABLE_HEADERS, params=params, timeout=15)
+        res.raise_for_status()
+        return len(res.json().get("records", []))
+    except Exception:
+        return -1
+
+
+def _refetch_fresh_attachments(record_id, field_id):
+    try:
+        data = _airtable_get(f"{AIRTABLE_BASE}/{record_id}")
+        atts = data.get("fields", {}).get(field_id, [])
+        if atts:
+            log.info(f"refetch {field_id}: {len(atts)} attachment(s), type={atts[0].get('type','?')}")
         else:
-            log.warning(f"refetch failed: HTTP {res.status_code}")
+            log.warning(f"refetch {field_id}: empty")
+        return atts
     except Exception as e:
         log.warning(f"refetch error: {e}")
     return []
 
 
 def _download_attachment_b64(attachments, label):
-    """Download attachment and return base64. Tries thumbnail first for HEIF."""
     if not attachments:
         return None
     att      = attachments[0]
@@ -183,7 +213,7 @@ def _download_attachment_b64(attachments, label):
             log.info(f"{label} [{source}]: status={r.status_code}, type={ct}, size={size}")
 
             if not r.ok:
-                log.warning(f"{label} [{source}]: HTTP {r.status_code}")
+                log.warning(f"{label} [{source}]: HTTP {r.status_code} — {r.text[:200]}")
                 continue
             if "heif" in ct or "heic" in ct:
                 log.warning(f"{label} [{source}]: HEIF content-type, skipping")
@@ -194,16 +224,24 @@ def _download_attachment_b64(attachments, label):
 
             log.info(f"{label}: downloaded OK from {source} ({size} bytes)")
             return base64.standard_b64encode(r.content).decode("utf-8")
-
         except Exception as e:
-            log.warning(f"{label} [{source}]: error - {e}")
+            log.warning(f"{label} [{source}]: error — {e}")
 
     log.warning(f"{label}: all download attempts failed")
     return None
 
 
+def save_approved_caption(record_id, caption):
+    res = requests.patch(
+        f"{AIRTABLE_BASE}/{record_id}",
+        headers=AIRTABLE_HEADERS,
+        json={"fields": {FLD_APPROVED_CAPTION: caption}}
+    )
+    res.raise_for_status()
+    log.info(f"caption saved to Airtable for {record_id}")
+
+
 def mark_as_published(record_id):
-    """Mark record as published=true in Airtable."""
     res = requests.patch(
         f"{AIRTABLE_BASE}/{record_id}",
         headers=AIRTABLE_HEADERS,
@@ -212,15 +250,20 @@ def mark_as_published(record_id):
     res.raise_for_status()
     log.info(f"record {record_id} marked as published")
 
+
 def mark_as_skipped(record_id):
-    mark_as_published(record_id)
+    res = requests.patch(
+        f"{AIRTABLE_BASE}/{record_id}",
+        headers=AIRTABLE_HEADERS,
+        json={"fields": {FLD_APPROVED_CAPTION: "[דולג]"}}
+    )
+    res.raise_for_status()
     log.info(f"record {record_id} skipped")
 
 
-# --- Claude AI - Vision + Caption ---------------------------------------------
+# ─── Claude AI ────────────────────────────────────────────────────────────────
 
 def generate_caption(record, extra_instructions="", before_b64=None, after_b64=None):
-    """Generate Hebrew caption using Claude Vision."""
     log.info("generating caption with Claude Vision...")
 
     fields = record.get("fields", {})
@@ -233,27 +276,27 @@ def generate_caption(record, extra_instructions="", before_b64=None, after_b64=N
     system_ctx = f"{brand_voice}\n\n{feedback_notes}".strip()
 
     job_desc = []
-    if items: job_desc.append(f"item: {items}")
-    if color: job_desc.append(f"color: {color}")
-    if notes: job_desc.append(f"notes: {notes}")
-    job_text = " | ".join(job_desc) if job_desc else "powder coating job"
+    if items:  job_desc.append(f"פריט: {items}")
+    if color:  job_desc.append(f"צבע: {color}")
+    if notes:  job_desc.append(f"הערות: {notes}")
+    job_text = " | ".join(job_desc) if job_desc else "עבודת צביעה באבקה"
 
-    caption_prompt = f"""You write social media posts for Rightek - a powder coating and sandblasting business.
+    caption_prompt = f"""אתה כותב פוסט עבור Rightek — עסק לצביעה באבקה וניקוי חול.
 
-Job details: {job_text}
-{f'Specific instructions: {extra_instructions}' if extra_instructions else ''}
+פרטי העבודה: {job_text}
+{f'הוראות ספציפיות: {extra_instructions}' if extra_instructions else ''}
 
-Write exactly 3 lines in HEBREW, following this structure:
+כתוב בדיוק 3 שורות, לפי המבנה הבא — ללא סטייה:
 
-Line 1: Factual description of the part, process and color.
-Line 2: One technical advantage of the coating for this part.
-Line 3: Exactly this, no changes: "for details contact us on WhatsApp 054-6500543"
+שורה 1: תיאור עובדתי של החלק, התהליך והגוון. (לדוגמה: "סט גאנטים אחרי ניקוי חול וצבע באבקה.")
+שורה 2: יתרון טכני אחד בלבד של הצביעה לחלק זה. (לדוגמה: "הצביעה עמידה יותר לשריטות מצביעה רגילה.")
+שורה 3: בדיוק כך ללא שינוי: "לפרטים ניתן ליצור קשר בווצאפ 054-6500543"
 
-Empty line.
-5 relevant hashtags including #Rightek.
+שורה ריקה.
+5 האשטאגים הרלוונטיים לחלק ולתהליך, כולל #Rightek תמיד.
 
-Forbidden: compliments, superlatives, emoji, more than 3 lines.
-Return only the ready post in Hebrew."""
+אסור: מחמאות, סופרלטיבים, המילים "מדהים/מושלם/וואו/מהפך", אמוג'י, יותר מ-3 שורות.
+החזר רק את הפוסט המוכן."""
 
     content = []
     if before_b64:
@@ -263,7 +306,7 @@ Return only the ready post in Hebrew."""
     content.append({"type": "text", "text": caption_prompt})
 
     if not before_b64 and not after_b64:
-        log.warning("no images, skipping caption generation")
+        log.warning("no images — skipping")
         raise ValueError("NO_IMAGES")
 
     img_count = sum(1 for x in [before_b64, after_b64] if x)
@@ -289,10 +332,9 @@ Return only the ready post in Hebrew."""
     return caption
 
 
-# --- Feedback summary ----------------------------------------------------------
+# ─── Feedback summary ─────────────────────────────────────────────────────────
 
 def run_feedback_summary_flow():
-    """Summarize all feedbacks and propose updated brand_voice."""
     log.info("starting feedback summary...")
     data          = load_json(FEEDBACK_FILE, {"feedbacks": [], "last_summary": "", "unsummarized_count": 0})
     all_feedbacks = data.get("feedbacks", [])
@@ -306,11 +348,11 @@ def run_feedback_summary_flow():
         all_lines.append(f"{marker} {fb['date']}: {fb['feedback']}")
     all_text = "\n".join(all_lines)
 
-    prompt = f"""Current brand_voice file:\n---\n{brand_voice}\n---\n
-All feedbacks (NEW = new ones):\n---\n{all_text}\n---\n
-1. Write a concise summary (5-8 bullet points) of what was learned.
-2. Write an updated version of brand_voice that incorporates the learnings.
-Return JSON only:
+    prompt = f"""קובץ brand_voice נוכחי:\n---\n{brand_voice}\n---\n
+כל הפידבקים (NEW = חדשים):\n---\n{all_text}\n---\n
+1. כתוב סיכום תמציתי (5-8 נקודות) של מה שנלמד.
+2. כתוב גרסה מעודכנת של brand_voice המשלבת את הלמידה.
+החזר JSON בלבד:
 {{"summary": "...", "updated_brand_voice": "..."}}"""
 
     res = requests.post(
@@ -334,13 +376,13 @@ Return JSON only:
         f"Feedback summary\n\nAll feedbacks:\n{'=' * 20}\n{all_text}\n{'=' * 20}"
     )
     keyboard = {"inline_keyboard": [[
-        {"text": "approve", "callback_data": "summary_approve"},
-        {"text": "reject",  "callback_data": "summary_reject"}
+        {"text": "✅ אשר ועדכן", "callback_data": "summary_approve"},
+        {"text": "❌ דחה",       "callback_data": "summary_reject"}
     ]]}
     _send_telegram_message(
         f"Summary:\n{'=' * 20}\n{new_summary}\n{'=' * 20}\n\n"
         f"Proposed brand_voice:\n{'=' * 20}\n{new_brand_voice}\n{'=' * 20}\n\n"
-        f"approve | reject | or send edited version as text",
+        f"approve / reject / or send edited text",
         keyboard=keyboard
     )
 
@@ -385,10 +427,9 @@ def _poll_for_summary_decision(proposed):
             time.sleep(5)
 
 
-# --- Telegram ------------------------------------------------------------------
+# ─── Telegram ─────────────────────────────────────────────────────────────────
 
 def _send_telegram_photo(photo_url, caption, keyboard=None):
-    """Download image and send to Telegram as bytes."""
     try:
         img_res = requests.get(photo_url, timeout=15,
                                headers={"User-Agent": "Mozilla/5.0 (compatible; SocialAgent/1.0)"})
@@ -407,7 +448,8 @@ def _send_telegram_photo(photo_url, caption, keyboard=None):
 
         res = requests.post(
             f"https://api.telegram.org/bot{CONFIG['TELEGRAM_BOT_TOKEN']}/sendPhoto",
-            data=data, files=files
+            data=data,
+            files=files
         )
         if not res.ok:
             log.error(f"telegram sendPhoto error {res.status_code}: {res.text}")
@@ -420,7 +462,6 @@ def _send_telegram_photo(photo_url, caption, keyboard=None):
 
 
 def _send_telegram_message(text, keyboard=None):
-    """Send text message to Telegram (no parse_mode to avoid formatting errors)."""
     payload = {
         "chat_id": CONFIG["TELEGRAM_CHAT_ID"],
         "text": text,
@@ -437,37 +478,39 @@ def _send_telegram_message(text, keyboard=None):
     except Exception as e:
         log.error(f"telegram error: {e}")
 
+
+def _get_image_url_from_record(record):
+    after_atts  = _refetch_fresh_attachments(record["id"], CONFIG["FLD_AFTER_PIC"])
+    before_atts = _refetch_fresh_attachments(record["id"], CONFIG["FLD_BEFORE_PIC"])
+    primary = after_atts or before_atts
+    if not primary:
+        return ""
+    att = primary[0]
+    att_type = att.get("type", "")
+    if "heif" in att_type or "heic" in att_type:
+        return att.get("thumbnails", {}).get("large", {}).get("url") or att.get("url", "")
+    return att.get("url", "")
+
+
 def send_approval_request(record, caption, attempt=1):
-    """Send caption + image to Telegram with approve/skip buttons."""
     fields      = record.get("fields", {})
     items       = fields.get(CONFIG["FLD_ITEMS"], "")
     color       = fields.get(CONFIG["FLD_COLOR"], "")
     attempt_txt = f" (attempt #{attempt})" if attempt > 1 else ""
 
-    # Fetch fresh URL (signed URLs expire)
-    after_atts  = _refetch_fresh_attachments(record["id"], CONFIG["FLD_AFTER_PIC"])
-    before_atts = _refetch_fresh_attachments(record["id"], CONFIG["FLD_BEFORE_PIC"])
-    primary     = after_atts or before_atts
-
-    image_url = ""
-    if primary:
-        att = primary[0]
-        att_type = att.get("type", "")
-        if "heif" in att_type or "heic" in att_type:
-            image_url = att.get("thumbnails", {}).get("large", {}).get("url") or att.get("url", "")
-        else:
-            image_url = att.get("url", "")
+    image_url = _get_image_url_from_record(record)
 
     keyboard = {"inline_keyboard": [[
-        {"text": "approve", "callback_data": f"approve_{record['id']}"},
-        {"text": "skip",    "callback_data": f"skip_{record['id']}"}
+        {"text": "✅ אשר",  "callback_data": f"approve_{record['id']}"},
+        {"text": "❌ דלג",  "callback_data": f"skip_{record['id']}"}
     ]]}
 
     text = (
-        f"Caption for approval{attempt_txt}\n"
+        f"caption for approval{attempt_txt}\n"
         f"{items} | {color}\n\n"
         f"---\n{caption}\n---\n\n"
-        f"approve | skip | or write correction instructions"
+        f"✅ approve  |  ❌ skip\n"
+        f"or write correction instructions"
     )
 
     if image_url:
@@ -475,8 +518,8 @@ def send_approval_request(record, caption, attempt=1):
     else:
         _send_telegram_message(text, keyboard)
 
+
 def poll_for_decision(record_id):
-    """Wait for Telegram: approve / skip / rejection feedback text."""
     log.info("waiting for decision...")
     last_id = None
     while True:
@@ -499,7 +542,6 @@ def poll_for_decision(record_id):
                     if data == f"skip_{record_id}":
                         _send_telegram_message("post skipped.")
                         return "skip", None
-
                 if "message" in u:
                     text = u["message"].get("text","")
                     if text and not text.startswith("/"):
@@ -509,26 +551,12 @@ def poll_for_decision(record_id):
             log.warning(f"polling: {e}")
             time.sleep(5)
 
-def send_publish_notification(record, caption, fb_url, ig_url):
-    fields = record.get("fields", {})
-    items  = fields.get(CONFIG["FLD_ITEMS"], "")
-    color  = fields.get(CONFIG["FLD_COLOR"], "")
-    _send_telegram_message(
-        f"Published! {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
-        f"{items} | {color}\n\n"
-        f"{'=' * 20}\nCaption (copy-paste):\n{'=' * 20}\n"
-        f"{caption}\n{'=' * 20}\n\n"
-        f"FB: {fb_url}\nIG: {ig_url}\n\n"
-        f"Next steps:\n"
-        f"1. Share from FB page to personal profile\n"
-        f"2. TikTok: download image + copy caption"
-    )
 
 def send_error_notification(msg):
-    _send_telegram_message(f"Agent error:\n\n{msg}")
+    _send_telegram_message(f"agent error:\n\n{msg}")
 
 
-# --- Facebook ------------------------------------------------------------------
+# ─── Facebook ─────────────────────────────────────────────────────────────────
 
 def publish_photo_to_facebook(image_url, caption):
     log.info("publishing to Facebook...")
@@ -542,7 +570,7 @@ def publish_photo_to_facebook(image_url, caption):
     return post_id, f"https://www.facebook.com/{CONFIG['FB_PAGE_ID']}/posts/{post_id}"
 
 
-# --- Instagram -----------------------------------------------------------------
+# ─── Instagram ────────────────────────────────────────────────────────────────
 
 def publish_photo_to_instagram(image_url, caption):
     log.info("publishing to Instagram...")
@@ -563,125 +591,202 @@ def publish_photo_to_instagram(image_url, caption):
     return post_id, f"https://www.instagram.com/p/{post_id}/"
 
 
-# --- Main flow -----------------------------------------------------------------
+# ═══════════════════════════════════════════════════════════════════════════════
+# FLOW 1: PREPARE
+# ═══════════════════════════════════════════════════════════════════════════════
 
-def run_publish_flow():
-    """Run publish flow with 10-minute timeout (approval loop needs time)."""
-    import threading
-    error = [None]
+def run_prepare_flow():
+    log.info("=" * 50)
+    log.info("PREPARE FLOW")
+    log.info("=" * 50)
 
-    def _inner():
-        try:
-            _run_publish_flow_inner()
-        except Exception as e:
-            error[0] = e
+    count = 0
+    while True:
+        record, before_b64, after_b64 = fetch_record_for_preparation()
 
-    t = threading.Thread(target=_inner, daemon=True)
-    t.start()
-    t.join(timeout=600)
-    if t.is_alive():
-        log.error("timeout - process stuck for 10+ minutes")
-        _send_telegram_message("Error: process stuck for 10+ minutes. Check Render logs.")
-        return
-    if error[0]:
-        raise error[0]
-
-
-def _run_publish_flow_inner():
-    """Core logic: fetch -> caption -> approve -> publish."""
-    record, before_b64, after_b64 = fetch_ready_record()
-
-    if not record:
-        _send_telegram_message("No ready posts. Mark a row as ready in Airtable.")
-        return
-
-    if not before_b64 and not after_b64:
-        _send_telegram_message(
-            "Found record but no images downloaded.\n"
-            f"Record: {record['id']}\n"
-            f"Fields: {list(record.get('fields', {}).keys())}\n"
-            "Check that before/after pic fields have attachments."
-        )
-        return
-
-    # Approval loop
-    attempt     = 1
-    extra_notes = ""
-    try:
-        caption = generate_caption(record, extra_notes, before_b64, after_b64)
-    except ValueError as e:
-        if "NO_IMAGES" in str(e):
-            _send_telegram_message("No images in record. Add an image in Airtable and retry.")
+        if not record:
+            if count == 0:
+                _send_telegram_message("no records need captions. mark rows as ready in Airtable and add photos.")
+            else:
+                bank = count_bank()
+                _send_telegram_message(f"done — {count} caption(s) saved to bank.\nBank total: {bank} post(s) ready.")
             return
+
+        if not before_b64 and not after_b64:
+            fields = record.get("fields", {})
+            items  = fields.get(CONFIG["FLD_ITEMS"], "?")
+            _send_telegram_message(f"record {items} has no downloadable images — skipping.")
+            mark_as_skipped(record["id"])
+            continue
+
+        try:
+            caption = generate_caption(record, "", before_b64, after_b64)
+        except ValueError as e:
+            if "NO_IMAGES" in str(e):
+                _send_telegram_message("no images — skipping this record.")
+                mark_as_skipped(record["id"])
+                continue
+            raise
+
+        attempt     = 1
+        extra_notes = ""
+        while True:
+            send_approval_request(record, caption, attempt)
+            decision, feedback = poll_for_decision(record["id"])
+
+            if decision == "approve":
+                save_approved_caption(record["id"], caption)
+                count += 1
+                _send_telegram_message(f"caption #{count} saved to bank. checking for more...")
+                break
+
+            if decision == "skip":
+                mark_as_skipped(record["id"])
+                break
+
+            if decision == "reject":
+                if feedback.strip().startswith("עכשיו:"):
+                    extra_notes = feedback.strip()[len("עכשיו:"):].strip()
+                    _send_telegram_message("one-time feedback — not saved.")
+                else:
+                    save_feedback(feedback)
+                    extra_notes = feedback
+                try:
+                    caption = generate_caption(record, extra_notes, before_b64, after_b64)
+                except ValueError:
+                    _send_telegram_message("no images — cannot rewrite.")
+                    mark_as_skipped(record["id"])
+                    break
+                attempt += 1
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FLOW 2: PUBLISH
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def run_publish_flow(force=False):
+    log.info("=" * 50)
+    log.info("PUBLISH FLOW")
+    log.info("=" * 50)
+
+    if is_paused() and not force:
+        log.info("publishing is PAUSED — skipping")
+        return
+
+    record = fetch_record_for_publishing()
+    if not record:
+        log.info("nothing to publish")
+        return
+
+    fields  = record.get("fields", {})
+    caption = fields.get(FLD_APPROVED_CAPTION, "")
+    items   = fields.get(CONFIG["FLD_ITEMS"], "")
+    color   = fields.get(CONFIG["FLD_COLOR"], "")
+
+    if not caption or caption == "[דולג]":
+        log.warning("record has no valid caption — skipping")
+        return
+
+    image_url = _get_image_url_from_record(record)
+    if not image_url:
+        send_error_notification(f"no image URL for publishing ({items})")
+        return
+
+    try:
+        fb_id,  fb_url  = publish_photo_to_facebook(image_url, caption)
+        ig_id,  ig_url  = publish_photo_to_instagram(image_url, caption)
+    except Exception as e:
+        send_error_notification(f"publish failed: {e}")
         raise
 
-    while True:
-        send_approval_request(record, caption, attempt)
-        decision, feedback = poll_for_decision(record["id"])
+    _send_telegram_message(
+        f"published! — {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+        f"{items} | {color}\n\n"
+        f"{'=' * 20}\n{caption}\n{'=' * 20}\n\n"
+        f"FB: {fb_url}\nIG: {ig_url}\n\n"
+        f"1. share from FB page to personal profile\n"
+        f"2. TikTok: download image + copy caption"
+    )
 
-        if decision == "approve":
-            break
-
-        if decision == "skip":
-            mark_as_skipped(record["id"])
-            return
-
-        if decision == "reject":
-            # "now:" prefix = one-time feedback, not saved
-            if feedback.strip().lower().startswith("now:"):
-                extra_notes = feedback.strip()[4:].strip()
-                _send_telegram_message("One-time feedback, not saved.")
-            else:
-                save_feedback(feedback)
-                extra_notes = feedback
-            try:
-                caption = generate_caption(record, extra_notes, before_b64, after_b64)
-            except ValueError as e:
-                if "NO_IMAGES" in str(e):
-                    _send_telegram_message("No images. Cannot write post.")
-                    return
-                raise
-            attempt += 1
-
-    # Publish - fetch fresh URL (old one expired during approval wait)
-    after_atts   = _refetch_fresh_attachments(record["id"], CONFIG["FLD_AFTER_PIC"])
-    before_atts  = _refetch_fresh_attachments(record["id"], CONFIG["FLD_BEFORE_PIC"])
-    primary_atts = after_atts or before_atts
-
-    image_url = None
-    if primary_atts:
-        att = primary_atts[0]
-        att_type = att.get("type", "")
-        if "heif" in att_type or "heic" in att_type:
-            image_url = att.get("thumbnails", {}).get("large", {}).get("url") or att.get("url")
-            log.info("using thumbnail for publish (HEIF original)")
-        else:
-            image_url = att.get("url")
-
-    if not image_url:
-        send_error_notification("No image URL for publishing")
-        return
-
-    fb_id, fb_url = publish_photo_to_facebook(image_url, caption)
-    ig_id, ig_url = publish_photo_to_instagram(image_url, caption)
-
-    send_publish_notification(record, caption, fb_url, ig_url)
     mark_as_published(record["id"])
     log.info("published successfully!")
 
+    # Low bank warning
+    remaining = count_bank()
+    if 0 < remaining <= LOW_BANK_THRESHOLD:
+        _send_telegram_message(
+            f"heads up: only {remaining} post(s) left in bank.\n"
+            f"send /newpost to prepare more."
+        )
+    elif remaining == 0:
+        _send_telegram_message(
+            "bank is empty! no posts for tomorrow.\n"
+            "send /newpost to prepare more."
+        )
+
+
+def run_skip_next():
+    """Skip the next post in the bank without publishing it."""
+    record = fetch_record_for_publishing()
+    if not record:
+        _send_telegram_message("nothing to skip — bank is empty.")
+        return
+    fields = record.get("fields", {})
+    items  = fields.get(CONFIG["FLD_ITEMS"], "?")
+    caption = fields.get(FLD_APPROVED_CAPTION, "?")
+    mark_as_published(record["id"])
+    remaining = count_bank()
+    _send_telegram_message(
+        f"skipped: {items}\n"
+        f"caption was:\n---\n{caption[:200]}\n---\n\n"
+        f"Bank: {remaining} post(s) remaining."
+    )
+
+
+def run_preview_next():
+    """Preview the next post that would be published."""
+    record = fetch_record_for_publishing()
+    if not record:
+        _send_telegram_message("bank is empty — nothing to preview.")
+        return
+    fields  = record.get("fields", {})
+    items   = fields.get(CONFIG["FLD_ITEMS"], "")
+    color   = fields.get(CONFIG["FLD_COLOR"], "")
+    caption = fields.get(FLD_APPROVED_CAPTION, "")
+
+    image_url = _get_image_url_from_record(record)
+
+    text = (
+        f"next post to be published:\n\n"
+        f"{items} | {color}\n\n"
+        f"---\n{caption}\n---"
+    )
+
+    if image_url:
+        _send_telegram_photo(image_url, text)
+    else:
+        _send_telegram_message(text)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ENTRY POINTS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def run():
-    """Daily scheduled entry point."""
-    log.info("=" * 50)
-    log.info("social agent - daily run")
-    log.info("=" * 50)
+    """Daily scheduled run."""
     try:
         run_publish_flow()
     except Exception as e:
-        log.error(f"error: {e}", exc_info=True)
+        log.error(f"publish error: {e}", exc_info=True)
         send_error_notification(str(e))
-        raise
 
+def run_prepare():
+    """On-demand caption preparation."""
+    try:
+        run_prepare_flow()
+    except Exception as e:
+        log.error(f"prepare error: {e}", exc_info=True)
+        send_error_notification(str(e))
 
 if __name__ == "__main__":
-    run()
+    run_prepare()
