@@ -1,0 +1,206 @@
+{
+  "name": "Morning → Airtable Contact Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 2
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Daily 02:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.greeninvoice.co.il/api/v1/account/token",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ id: $env.MORNING_KEY_ID, secret: $env.MORNING_KEY_SECRET }) }}",
+        "options": {}
+      },
+      "id": "get-morning-token",
+      "name": "Get Morning Token",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pagination loop — fetch all clients from Morning\nconst token = $input.first().json.token;\nconst pageSize = 100;\nlet page = 0;\nlet allClients = [];\nlet hasMore = true;\n\nwhile (hasMore) {\n  const resp = await $http.request({\n    method: 'POST',\n    url: 'https://api.greeninvoice.co.il/api/v1/clients/search',\n    headers: {\n      'Authorization': `Bearer ${token}`,\n      'Content-Type': 'application/json'\n    },\n    body: JSON.stringify({ page, pageSize }),\n  });\n  \n  const data = typeof resp === 'string' ? JSON.parse(resp) : resp;\n  const items = data.items || [];\n  allClients = allClients.concat(items);\n  \n  page++;\n  hasMore = items.length === pageSize && page < (data.pages || 0);\n}\n\nreturn allClients.map(client => ({ json: client }));"
+      },
+      "id": "fetch-all-clients",
+      "name": "Fetch All Clients (Paginated)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalize phone + prepare fields\nfunction normalizePhone(phone) {\n  if (!phone) return '';\n  let clean = phone.replace(/\\D/g, '');\n  if (clean.startsWith('972')) clean = '0' + clean.slice(3);\n  if (clean.startsWith('5') && clean.length === 9) clean = '0' + clean;\n  return clean;\n}\n\nconst client = $input.item.json;\n\n// Prefer mobile over phone, fallback chain\nconst rawPhone = client.mobile || client.phone || '';\n\nreturn [{\n  json: {\n    morningId: client.id || '',\n    name: client.contactPerson || client.name || '',\n    company: client.name || '',\n    phone: normalizePhone(rawPhone),\n    email: (client.emails && client.emails.length > 0) ? client.emails[0] : '',\n    taxId: client.taxId || '',\n    source: 'Morning',\n  }\n}];"
+      },
+      "id": "normalize-data",
+      "name": "Normalize Phone & Map Fields",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [660, 0]
+    },
+    {
+      "parameters": {
+        "operation": "search",
+        "base": {
+          "__rl": true,
+          "value": "appOtMp0nXKLtU5Yk",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "CONTACTS_TABLE_ID",
+          "mode": "id"
+        },
+        "filterByFormula": "={{'{מזהה חיצוני}=\"' + $json.morningId + '\"'}}",
+        "options": {}
+      },
+      "id": "search-airtable",
+      "name": "Search Contact by External ID",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [880, 0],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "has-match",
+              "leftValue": "={{ $json.id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check-exists",
+      "name": "Contact Exists?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1100, 0]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "base": {
+          "__rl": true,
+          "value": "appOtMp0nXKLtU5Yk",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "CONTACTS_TABLE_ID",
+          "mode": "id"
+        },
+        "id": "={{ $('Search Contact by External ID').item.json.id }}",
+        "fields": {
+          "values": [
+            { "fieldName": "שם", "fieldValue": "={{ $('Normalize Phone & Map Fields').item.json.name }}" },
+            { "fieldName": "טלפון", "fieldValue": "={{ $('Normalize Phone & Map Fields').item.json.phone }}" },
+            { "fieldName": "לקוח", "fieldValue": "={{ $('Normalize Phone & Map Fields').item.json.company }}" },
+            { "fieldName": "אימייל", "fieldValue": "={{ $('Normalize Phone & Map Fields').item.json.email }}" },
+            { "fieldName": "ח.פ / ע.מ", "fieldValue": "={{ $('Normalize Phone & Map Fields').item.json.taxId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-contact",
+      "name": "Update Existing Contact",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1320, -100]
+    },
+    {
+      "parameters": {
+        "operation": "create",
+        "base": {
+          "__rl": true,
+          "value": "appOtMp0nXKLtU5Yk",
+          "mode": "id"
+        },
+        "table": {
+          "__rl": true,
+          "value": "CONTACTS_TABLE_ID",
+          "mode": "id"
+        },
+        "fields": {
+          "values": [
+            { "fieldName": "שם", "fieldValue": "={{ $('Normalize Phone & Map Fields').item.json.name }}" },
+            { "fieldName": "טלפון", "fieldValue": "={{ $('Normalize Phone & Map Fields').item.json.phone }}" },
+            { "fieldName": "לקוח", "fieldValue": "={{ $('Normalize Phone & Map Fields').item.json.company }}" },
+            { "fieldName": "מקור", "fieldValue": "Morning" },
+            { "fieldName": "מזהה חיצוני", "fieldValue": "={{ $('Normalize Phone & Map Fields').item.json.morningId }}" },
+            { "fieldName": "אימייל", "fieldValue": "={{ $('Normalize Phone & Map Fields').item.json.email }}" },
+            { "fieldName": "ח.פ / ע.מ", "fieldValue": "={{ $('Normalize Phone & Map Fields').item.json.taxId }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-contact",
+      "name": "Create New Contact",
+      "type": "n8n-nodes-base.airtable",
+      "typeVersion": 2.1,
+      "position": [1320, 100]
+    }
+  ],
+  "connections": {
+    "Daily 02:00": {
+      "main": [[{ "node": "Get Morning Token", "type": "main", "index": 0 }]]
+    },
+    "Get Morning Token": {
+      "main": [[{ "node": "Fetch All Clients (Paginated)", "type": "main", "index": 0 }]]
+    },
+    "Fetch All Clients (Paginated)": {
+      "main": [[{ "node": "Normalize Phone & Map Fields", "type": "main", "index": 0 }]]
+    },
+    "Normalize Phone & Map Fields": {
+      "main": [[{ "node": "Search Contact by External ID", "type": "main", "index": 0 }]]
+    },
+    "Search Contact by External ID": {
+      "main": [[{ "node": "Contact Exists?", "type": "main", "index": 0 }]]
+    },
+    "Contact Exists?": {
+      "main": [
+        [{ "node": "Update Existing Contact", "type": "main", "index": 0 }],
+        [{ "node": "Create New Contact", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "rightek-contact-sync"
+  },
+  "tags": [
+    { "name": "contacts" },
+    { "name": "morning" },
+    { "name": "sync" }
+  ]
+}
