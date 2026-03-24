@@ -2,11 +2,6 @@ name: Setup Airtable Contacts Table
 
 on:
   workflow_dispatch:
-    inputs:
-      airtable_token:
-        description: 'Airtable Personal Access Token'
-        required: true
-        type: string
 
 jobs:
   setup:
@@ -22,5 +17,5 @@ jobs:
 
       - name: Run setup_airtable.py
         env:
-          AIRTABLE_API_KEY: ${{ inputs.airtable_token }}
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_TOKEN }}
         run: python social-agent/contact-sync/setup_airtable.py
