@@ -1,0 +1,26 @@
+name: Setup Airtable Contacts Table
+
+on:
+  workflow_dispatch:
+    inputs:
+      airtable_token:
+        description: 'Airtable Personal Access Token'
+        required: true
+        type: string
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install requests
+
+      - name: Run setup_airtable.py
+        env:
+          AIRTABLE_API_KEY: ${{ inputs.airtable_token }}
+        run: python social-agent/contact-sync/setup_airtable.py
