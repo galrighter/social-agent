@@ -17,5 +17,5 @@ jobs:
 
       - name: Run setup_airtable.py
         env:
-          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_TOKEN }}
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_TOKEN1 }}
         run: python social-agent/contact-sync/setup_airtable.py
