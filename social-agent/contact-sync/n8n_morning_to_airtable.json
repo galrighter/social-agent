@@ -62,7 +62,7 @@
         },
         "table": {
           "__rl": true,
-          "value": "CONTACTS_TABLE_ID",
+          "value": "tbljmeJryHQjKX99I",
           "mode": "id"
         },
         "filterByFormula": "={{'{מזהה חיצוני}=\"' + $json.morningId + '\"'}}",
@@ -114,7 +114,7 @@
         },
         "table": {
           "__rl": true,
-          "value": "CONTACTS_TABLE_ID",
+          "value": "tbljmeJryHQjKX99I",
           "mode": "id"
         },
         "id": "={{ $('Search Contact by External ID').item.json.id }}",
@@ -145,7 +145,7 @@
         },
         "table": {
           "__rl": true,
-          "value": "CONTACTS_TABLE_ID",
+          "value": "tbljmeJryHQjKX99I",
           "mode": "id"
         },
         "fields": {

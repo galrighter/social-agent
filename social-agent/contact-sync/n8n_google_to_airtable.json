@@ -70,7 +70,7 @@
       "parameters": {
         "operation": "search",
         "base": { "__rl": true, "value": "appOtMp0nXKLtU5Yk", "mode": "id" },
-        "table": { "__rl": true, "value": "CONTACTS_TABLE_ID", "mode": "id" },
+        "table": { "__rl": true, "value": "tbljmeJryHQjKX99I", "mode": "id" },
         "filterByFormula": "={{'{מזהה חיצוני}=\"' + $json.resourceName + '\"'}}",
         "options": {}
       },
@@ -107,7 +107,7 @@
       "parameters": {
         "operation": "update",
         "base": { "__rl": true, "value": "appOtMp0nXKLtU5Yk", "mode": "id" },
-        "table": { "__rl": true, "value": "CONTACTS_TABLE_ID", "mode": "id" },
+        "table": { "__rl": true, "value": "tbljmeJryHQjKX99I", "mode": "id" },
         "id": "={{ $('Search by External ID').item.json.id }}",
         "fields": {
           "values": [
@@ -129,7 +129,7 @@
       "parameters": {
         "operation": "search",
         "base": { "__rl": true, "value": "appOtMp0nXKLtU5Yk", "mode": "id" },
-        "table": { "__rl": true, "value": "CONTACTS_TABLE_ID", "mode": "id" },
+        "table": { "__rl": true, "value": "tbljmeJryHQjKX99I", "mode": "id" },
         "filterByFormula": "={{'{טלפון}=\"' + $('Normalize Google Data').item.json.phoneNormalized + '\"'}}",
         "options": {}
       },
@@ -166,7 +166,7 @@
       "parameters": {
         "operation": "update",
         "base": { "__rl": true, "value": "appOtMp0nXKLtU5Yk", "mode": "id" },
-        "table": { "__rl": true, "value": "CONTACTS_TABLE_ID", "mode": "id" },
+        "table": { "__rl": true, "value": "tbljmeJryHQjKX99I", "mode": "id" },
         "id": "={{ $('Search by Phone (Fallback)').item.json.id }}",
         "fields": {
           "values": [
@@ -188,7 +188,7 @@
       "parameters": {
         "operation": "create",
         "base": { "__rl": true, "value": "appOtMp0nXKLtU5Yk", "mode": "id" },
-        "table": { "__rl": true, "value": "CONTACTS_TABLE_ID", "mode": "id" },
+        "table": { "__rl": true, "value": "tbljmeJryHQjKX99I", "mode": "id" },
         "fields": {
           "values": [
             { "fieldName": "שם", "fieldValue": "={{ $('Normalize Google Data').item.json.name }}" },
