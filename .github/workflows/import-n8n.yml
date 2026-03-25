@@ -1,0 +1,37 @@
+name: Import n8n Workflows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Import Morning → Airtable workflow
+        run: |
+          curl -s -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
+            -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d @social-agent/contact-sync/n8n_morning_to_airtable.json
+          echo ""
+          echo "--- Morning → Airtable: done ---"
+
+      - name: Import Google → Airtable workflow
+        run: |
+          curl -s -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
+            -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d @social-agent/contact-sync/n8n_google_to_airtable.json
+          echo ""
+          echo "--- Google → Airtable: done ---"
+
+      - name: Import Airtable → Google workflow
+        run: |
+          curl -s -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
+            -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d @social-agent/contact-sync/n8n_airtable_to_google.json
+          echo ""
+          echo "--- Airtable → Google: done ---"
