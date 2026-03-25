@@ -5,7 +5,7 @@
       "parameters": {
         "event": "newRecord",
         "base": { "__rl": true, "value": "appOtMp0nXKLtU5Yk", "mode": "id" },
-        "table": { "__rl": true, "value": "CONTACTS_TABLE_ID", "mode": "id" },
+        "table": { "__rl": true, "value": "tbljmeJryHQjKX99I", "mode": "id" },
         "pollTimes": {
           "item": [{ "mode": "everyMinute" }]
         }
@@ -106,7 +106,7 @@
       "parameters": {
         "operation": "update",
         "base": { "__rl": true, "value": "appOtMp0nXKLtU5Yk", "mode": "id" },
-        "table": { "__rl": true, "value": "CONTACTS_TABLE_ID", "mode": "id" },
+        "table": { "__rl": true, "value": "tbljmeJryHQjKX99I", "mode": "id" },
         "id": "={{ $json.airtableRecordId }}",
         "fields": {
           "values": [

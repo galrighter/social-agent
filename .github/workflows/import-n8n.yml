@@ -11,27 +11,27 @@ jobs:
 
       - name: Import Morning → Airtable workflow
         run: |
-          curl -s -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
+          echo "=== Morning → Airtable ==="
+          RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
             -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d @social-agent/contact-sync/n8n_morning_to_airtable.json
-          echo ""
-          echo "--- Morning → Airtable: done ---"
+            -d @social-agent/contact-sync/n8n_morning_to_airtable.json)
+          echo "$RESP"
 
       - name: Import Google → Airtable workflow
         run: |
-          curl -s -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
+          echo "=== Google → Airtable ==="
+          RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
             -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d @social-agent/contact-sync/n8n_google_to_airtable.json
-          echo ""
-          echo "--- Google → Airtable: done ---"
+            -d @social-agent/contact-sync/n8n_google_to_airtable.json)
+          echo "$RESP"
 
       - name: Import Airtable → Google workflow
         run: |
-          curl -s -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
+          echo "=== Airtable → Google ==="
+          RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
             -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
             -H "Content-Type: application/json" \
-            -d @social-agent/contact-sync/n8n_airtable_to_google.json
-          echo ""
-          echo "--- Airtable → Google: done ---"
+            -d @social-agent/contact-sync/n8n_airtable_to_google.json)
+          echo "$RESP"
