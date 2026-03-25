@@ -9,29 +9,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Import Morning → Airtable workflow
+      - name: Import all workflows to n8n
         run: |
-          echo "=== Morning → Airtable ==="
-          RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
-            -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d @social-agent/contact-sync/n8n_morning_to_airtable.json)
-          echo "$RESP"
+          N8N_URL="https://n8n-rightek.onrender.com/api/v1/workflows"
+          API_KEY="${{ secrets.N8N_API_KEY }}"
 
-      - name: Import Google → Airtable workflow
-        run: |
-          echo "=== Google → Airtable ==="
-          RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
-            -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d @social-agent/contact-sync/n8n_google_to_airtable.json)
-          echo "$RESP"
+          for file in \
+            social-agent/contact-sync/n8n_morning_to_airtable.json \
+            social-agent/contact-sync/n8n_google_to_airtable.json \
+            social-agent/contact-sync/n8n_airtable_to_google.json
+          do
+            NAME=$(jq -r '.name' "$file")
+            echo "=== Importing: $NAME ==="
 
-      - name: Import Airtable → Google workflow
-        run: |
-          echo "=== Airtable → Google ==="
-          RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "https://n8n-rightek.onrender.com/api/v1/workflows" \
-            -H "X-N8N-API-KEY: ${{ secrets.N8N_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d @social-agent/contact-sync/n8n_airtable_to_google.json)
-          echo "$RESP"
+            # Strip fields n8n API doesn't accept (meta, tags)
+            PAYLOAD=$(jq '{name, nodes, connections, settings}' "$file")
+
+            RESP=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$N8N_URL" \
+              -H "X-N8N-API-KEY: $API_KEY" \
+              -H "Content-Type: application/json" \
+              -d "$PAYLOAD")
+
+            HTTP_CODE=$(echo "$RESP" | tail -1 | sed 's/HTTP_STATUS://')
+            BODY=$(echo "$RESP" | sed '$d')
+            echo "$BODY"
+            echo "Status: $HTTP_CODE"
+
+            if [ "$HTTP_CODE" != "200" ] && [ "$HTTP_CODE" != "201" ]; then
+              echo "ERROR: Failed to import $NAME"
+              exit 1
+            fi
+            echo ""
+          done
+          echo "All workflows imported successfully!"
