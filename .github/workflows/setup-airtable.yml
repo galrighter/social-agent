@@ -2,6 +2,15 @@ name: Setup Airtable Contacts Table
 
 on:
   workflow_dispatch:
+    inputs:
+      script:
+        description: 'Script to run'
+        required: true
+        default: 'add_fields'
+        type: choice
+        options:
+          - add_fields
+          - setup_airtable
 
 jobs:
   setup:
@@ -15,7 +24,7 @@ jobs:
 
       - run: pip install requests
 
-      - name: Run setup_airtable.py
+      - name: Run selected script
         env:
-          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_TOKEN }}
-        run: python social-agent/contact-sync/setup_airtable.py
+          AIRTABLE_API_KEY: ${{ secrets.AIRTABLE_TOKEN1 }}
+        run: python social-agent/contact-sync/${{ inputs.script }}.py
