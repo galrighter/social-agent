@@ -1,0 +1,151 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --poker-bg: #042b18;
+  --poker-bg2: #06391f;
+  --poker-bg3: #0b4a29;
+  --poker-gold: #d9b45a;
+  --poker-cream: #f5e7b8;
+}
+
+html {
+  direction: rtl;
+}
+
+body {
+  font-family: system-ui, "Segoe UI", Arial, sans-serif;
+  color: #102015;
+}
+
+@layer components {
+  /* רקע שולחן פוקר: גרדיאנט felt + טקסטורה עדינה */
+  .poker-bg {
+    background-color: var(--poker-bg);
+    background-image:
+      radial-gradient(ellipse 120% 80% at 50% -10%, rgba(23, 107, 56, 0.85) 0%, rgba(6, 57, 31, 0.4) 55%, transparent 100%),
+      radial-gradient(ellipse 90% 60% at 50% 110%, rgba(4, 32, 18, 0.9) 0%, transparent 70%),
+      linear-gradient(160deg, #06391f 0%, #042b18 60%, #032213 100%);
+    position: relative;
+    min-height: 100vh;
+  }
+
+  .poker-bg::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background-image:
+      radial-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1.5px);
+    background-size: 22px 22px;
+    z-index: 0;
+  }
+
+  .poker-container {
+    @apply relative z-10 mx-auto w-full max-w-dashboard px-3 py-6 sm:px-6;
+  }
+
+  /* כרטיס פאנל לבן עם מסגרת זהב */
+  .poker-card {
+    @apply rounded-2xl bg-poker-panel shadow-[0_10px_30px_rgba(0,0,0,0.35)] overflow-hidden;
+    border: 1.5px solid rgba(214, 179, 90, 0.75);
+  }
+
+  .gold-border {
+    border: 1.5px solid rgba(214, 179, 90, 0.75);
+  }
+
+  .panel-header-green {
+    @apply bg-gradient-to-l from-poker-green to-poker-dark text-poker-cream;
+  }
+
+  .panel-header-gold {
+    @apply text-white;
+    background: linear-gradient(to left, #a77a18, #8a6616);
+  }
+
+  .panel-header-blue {
+    @apply text-white;
+    background: linear-gradient(to left, #34557e, #24395c);
+  }
+
+  .panel-header-deepblue {
+    @apply text-white;
+    background: linear-gradient(to left, #1f3a5c, #142743);
+  }
+
+  .panel-header-purple {
+    @apply text-white;
+    background: linear-gradient(to left, #5b4a8a, #423468);
+  }
+
+  .profit-text {
+    color: #147a35;
+  }
+
+  .loss-text {
+    color: #a12a2a;
+  }
+
+  .soft-loss-text {
+    color: #8a6616;
+  }
+
+  .gold-heading {
+    color: var(--poker-gold);
+    text-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
+  }
+
+  /* צ'יפ פוקר ב־CSS בלבד */
+  .poker-chip {
+    @apply relative inline-block rounded-full;
+    box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.85), 0 3px 8px rgba(0, 0, 0, 0.45);
+  }
+
+  .poker-chip::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    border: 4px dashed rgba(255, 255, 255, 0.8);
+  }
+
+  .poker-chip::after {
+    content: "";
+    position: absolute;
+    inset: 22%;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.16);
+    border: 1px solid rgba(255, 255, 255, 0.55);
+  }
+
+  .suit-decor {
+    text-shadow: 0 3px 12px rgba(0, 0, 0, 0.5);
+    user-select: none;
+  }
+
+  .rank-badge {
+    @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-extrabold;
+  }
+
+  .nav-link {
+    @apply rounded-full px-4 py-1.5 text-sm font-semibold text-poker-cream/85 transition hover:bg-white/10 hover:text-white;
+  }
+
+  .nav-link-active {
+    @apply bg-poker-gold text-poker-text hover:bg-poker-gold hover:text-poker-text;
+  }
+
+  .field-input {
+    @apply rounded-lg border border-poker-goldBorder/60 bg-white px-3 py-1.5 text-sm text-poker-text outline-none focus:ring-2 focus:ring-poker-gold/60;
+  }
+
+  .quick-range-btn {
+    @apply rounded-full border border-poker-gold/50 px-3 py-1 text-xs font-semibold text-poker-cream/90 transition hover:bg-poker-gold/20;
+  }
+
+  .quick-range-btn-active {
+    @apply bg-poker-gold text-poker-text hover:bg-poker-gold;
+  }
+}
