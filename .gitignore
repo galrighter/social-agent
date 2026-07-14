@@ -27,3 +27,6 @@ next-env.d.ts
 
 # tests
 /coverage
+
+# claude session state (reflect markers etc.)
+/.claude/
