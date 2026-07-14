@@ -1,0 +1,60 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Transaction {
+  id                String   @id @default(cuid())
+  rowHash           String   @unique
+  playerKey         String
+  playerName        String
+  phone             String?
+  type              String // payment | redeem | unknown
+  rawAmount         Float
+  effectiveAmount   Float
+  occurredAt        DateTime
+  rawDateText       String?
+  notes             String?
+  sourceFileName    String
+  importBatchId     String
+  excludedFromStats Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  importBatch ImportBatch @relation(fields: [importBatchId], references: [id])
+
+  @@index([occurredAt])
+  @@index([playerKey])
+  @@index([type])
+}
+
+model ImportBatch {
+  id                   String   @id @default(cuid())
+  fileName             String
+  uploadedAt           DateTime @default(now())
+  totalRows            Int
+  insertedRows         Int
+  skippedDuplicateRows Int
+  invalidRows          Int
+  correctionRows       Int
+
+  transactions Transaction[]
+}
+
+model DataCorrection {
+  id               String   @id @default(cuid())
+  name             String   @unique
+  enabled          Boolean  @default(true)
+  matchPlayerName  String?
+  matchPhone       String?
+  matchType        String?
+  matchOccurredAt  String? // ISO-to-second, e.g. 2024-03-23T23:33:21
+  matchRawAmount   Float?
+  effectiveAmount  Float?
+  excludeFromStats Boolean  @default(false)
+  note             String?
+  createdAt        DateTime @default(now())
+}
