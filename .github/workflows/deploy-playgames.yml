@@ -54,10 +54,12 @@ jobs:
         env:
           SSH_KEY_A: ${{ secrets.HETZNER_SSH_KEY }}
           SSH_KEY_B: ${{ secrets.SSH_KEY }}
+          SSH_KEY_C: ${{ secrets.HETZNER_SSH_KEY1 }}
+          SSH_KEY_D: ${{ secrets.DEPLOY_SSH_KEY }}
           IN_HOST: ${{ secrets.HETZNER_HOST }}
           IN_USER: ${{ secrets.HETZNER_USER }}
         run: |
-          SSH_KEY="${SSH_KEY_A:-$SSH_KEY_B}"
+          SSH_KEY="${SSH_KEY_A:-${SSH_KEY_B:-${SSH_KEY_C:-$SSH_KEY_D}}}"
           if [ -z "$SSH_KEY" ]; then
             echo "::error::No SSH key secret found. Add HETZNER_SSH_KEY in repo Settings → Secrets → Actions."
             exit 1
