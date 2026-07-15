@@ -1,0 +1,111 @@
+name: Deploy playgames (poker dashboard)
+
+# Builds the Next.js app (standalone, basePath=/playgames) and deploys it to the
+# Hetzner box over SSH. nginx on the box proxies powdercoat.co.il/playgames to it
+# (the proxy snippet is provisioned here; the vhost include ships in powdercoat-site).
+#
+# Required repo secret (in THIS repo, social-agent):
+#   HETZNER_SSH_KEY (or SSH_KEY) — private SSH key for root@<host>
+# Optional (defaults shown):
+#   HETZNER_HOST = 167.233.112.68
+#   HETZNER_USER = root
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-playgames
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build (standalone, basePath=/playgames)
+        env:
+          NEXT_PUBLIC_BASE_PATH: /playgames
+          DATABASE_URL: file:./build-placeholder.db
+        run: |
+          npm ci
+          npm test
+          npm run build
+
+      - name: Assemble bundle
+        run: |
+          rm -rf bundle
+          mkdir -p bundle
+          cp -r .next/standalone/. bundle/
+          mkdir -p bundle/.next/static
+          cp -r .next/static/. bundle/.next/static/
+          [ -d public ] && cp -r public bundle/public || true
+          cp -r prisma bundle/prisma
+          rm -f bundle/prisma/*.db bundle/prisma/*.db-journal
+          du -sh bundle
+
+      - name: Set up SSH
+        env:
+          SSH_KEY_A: ${{ secrets.HETZNER_SSH_KEY }}
+          SSH_KEY_B: ${{ secrets.SSH_KEY }}
+          IN_HOST: ${{ secrets.HETZNER_HOST }}
+          IN_USER: ${{ secrets.HETZNER_USER }}
+        run: |
+          SSH_KEY="${SSH_KEY_A:-$SSH_KEY_B}"
+          if [ -z "$SSH_KEY" ]; then
+            echo "::error::No SSH key secret found. Add HETZNER_SSH_KEY in repo Settings → Secrets → Actions."
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          HOST="${IN_HOST:-167.233.112.68}"
+          USER="${IN_USER:-root}"
+          echo "HOST=$HOST" >> "$GITHUB_ENV"
+          echo "USER=$USER" >> "$GITHUB_ENV"
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
+
+      - name: Provision server (node + systemd + nginx snippet, idempotent)
+        run: |
+          scp -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new \
+            deploy/playgames-server-setup.sh "$USER@$HOST:/tmp/playgames-server-setup.sh"
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "$USER@$HOST" \
+            'bash /tmp/playgames-server-setup.sh'
+
+      - name: Upload app bundle
+        run: |
+          rsync -az --delete -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new" \
+            bundle/ "$USER@$HOST:/opt/playgames/app/"
+
+      - name: Migrate DB + restart service
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "$USER@$HOST" '
+            set -e
+            cd /opt/playgames/app
+            DATABASE_URL=file:/opt/playgames/data/prod.db \
+              npx --yes prisma@6 migrate deploy --schema prisma/schema.prisma
+            systemctl restart playgames
+            sleep 3
+            systemctl is-active playgames
+          '
+
+      - name: Verify app answers behind the proxy
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=accept-new "$USER@$HOST" '
+            set -e
+            app=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3017/playgames/dashboard)
+            echo "app direct -> HTTP $app (expect 200)"
+            [ "$app" = "200" ] || { echo "::error::playgames app not serving"; journalctl -u playgames -n 30 --no-pager; exit 1; }
+            via=$(curl -sk -o /dev/null -w "%{http_code}" -H "Host: powdercoat.co.il" https://127.0.0.1/playgames/dashboard || echo 000)
+            echo "via nginx -> HTTP $via (expect 200; non-200 means the vhost include has not shipped yet)"
+          '
+          EXT="$(curl -fsS -m 15 -o /dev/null -w '%{http_code}' https://powdercoat.co.il/playgames/dashboard || echo 000)"
+          echo "External https://powdercoat.co.il/playgames/dashboard: HTTP $EXT"
+          echo "### playgames deployed :spades:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- https://powdercoat.co.il/playgames — external check returned HTTP $EXT" >> "$GITHUB_STEP_SUMMARY"

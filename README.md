@@ -14,6 +14,15 @@ NEXT_PUBLIC_BASE_PATH=/playgames npm run build
 
 (בפיתוח מקומי אין צורך — האתר רץ בשורש.)
 
+### פריסה לשרת (Hetzner)
+
+ה־workflow‏ `deploy-playgames.yml` נבנה, בודק ופורס אוטומטית בכל push ל־`main`
+(או ידנית דרך workflow_dispatch): build כ־standalone עם `basePath=/playgames`,
+‏rsync ל־`/opt/playgames/app`, מיגרציית Prisma על `/opt/playgames/data/prod.db`,
+והפעלה מחדש של שירות `playgames` (systemd, פורט 3017). ‏nginx בשרת מפנה את
+`powdercoat.co.il/playgames` לאפליקציה (ה־include יושב ב־vhost של powdercoat-site).
+נדרש secret בשם `HETZNER_SSH_KEY` בריפו הזה.
+
 ## התקנה
 
 ```bash
