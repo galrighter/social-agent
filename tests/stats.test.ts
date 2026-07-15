@@ -3,6 +3,8 @@ import {
   buildGamesFromTransactions,
   assignTransactionsToGames,
   computeDashboardStats,
+  allTimeGamesAttended,
+  regularPlayerKeys,
   topAvgLoss,
   ENTRY_FEE,
   type TransactionForStats,
@@ -302,5 +304,48 @@ describe("רגרסיה: הנמושות — יולי 2026", () => {
     expect(oren?.net).not.toBe(2292);
     // אין שחקן שבלע את כל 1650 הזכיות
     expect(stats.players.every((p) => p.received < 1650)).toBe(true);
+  });
+});
+
+describe("זכאות לפי כל התקופה (הסתרת מזדמנים)", () => {
+  // 10 משחקים לשחקן "קבוע" (5 ביוני, 5 ביולי), משחק אחד בלבד ל"מזדמן".
+  function buildAllTimeFixture(): TransactionForStats[] {
+    const rows: TransactionForStats[] = [];
+    const days = [
+      "2026-06-01", "2026-06-03", "2026-06-05", "2026-06-07", "2026-06-09",
+      "2026-07-01", "2026-07-03", "2026-07-05", "2026-07-07", "2026-07-09",
+    ];
+    days.forEach((d) => {
+      rows.push(tx({ playerName: "קבוע", effectiveAmount: 25, occurredAt: at(`${d}T20:00:00`) }));
+    });
+    // מזדמן משחק רק במשחק הראשון
+    rows.push(tx({ playerName: "מזדמן", effectiveAmount: 25, occurredAt: at("2026-06-01T20:30:00") }));
+    return rows;
+  }
+
+  it("allTimeGamesAttended סופר משחק פעם אחת לשחקן, על פני כל התקופה", () => {
+    const counts = allTimeGamesAttended(buildAllTimeFixture());
+    expect(counts.get("קבוע")).toBe(10);
+    expect(counts.get("מזדמן")).toBe(1);
+  });
+
+  it("regularPlayerKeys כולל רק שחקנים עם 10+ משחקים בכל התקופה", () => {
+    const keys = regularPlayerKeys(buildAllTimeFixture());
+    expect(keys.has("קבוע")).toBe(true);
+    expect(keys.has("מזדמן")).toBe(false);
+  });
+
+  it("קבוע נשאר זכאי גם בטווח קצר שבו שיחק פחות מ־10 משחקים", () => {
+    const fixture = buildAllTimeFixture();
+    const keys = regularPlayerKeys(fixture);
+    // טווח יוני בלבד — לקבוע יש בו 5 משחקים בלבד, אך הוא עדיין קבוע
+    const juneBounds = rangeToBounds({ from: "2026-06-01", to: "2026-06-30" });
+    const stats = computeDashboardStats(fixture, juneBounds);
+    const kavua = stats.players.find((p) => p.playerName === "קבוע");
+    expect(kavua?.gamesAttended).toBe(5); // בטווח בלבד
+    // הסינון לתצוגה — לפי הזכאות מכל התקופה — עדיין מכיל אותו
+    const shown = stats.players.filter((p) => keys.has(p.playerKey));
+    expect(shown.map((p) => p.playerName)).toContain("קבוע");
+    expect(shown.map((p) => p.playerName)).not.toContain("מזדמן");
   });
 });

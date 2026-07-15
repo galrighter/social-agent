@@ -12,7 +12,13 @@ export async function GET(request: NextRequest) {
     params.get("from"),
     params.get("to")
   );
-  const stats = await statsForRange(range);
+  const { stats, regularKeys } = await statsForRange(range);
 
-  return NextResponse.json({ range, isDefault, allTime, stats });
+  return NextResponse.json({
+    range,
+    isDefault,
+    allTime,
+    stats,
+    regularKeys: [...regularKeys],
+  });
 }
