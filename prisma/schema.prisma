@@ -1,5 +1,7 @@
 generator client {
   provider = "prisma-client-js"
+  // ה-build רץ על ubuntu-24 (openssl 3) אבל השרת עשוי להריץ openssl 1.1 — לכלול את שני המנועים
+  binaryTargets = ["native", "debian-openssl-1.1.x", "debian-openssl-3.0.x"]
 }
 
 datasource db {
