@@ -1,27 +1,30 @@
 const ilsWhole = new Intl.NumberFormat("he-IL", { maximumFractionDigits: 0 });
 
-/** ₪ עם פסיקים, בלי אגורות: ₪487,577 */
+/** יחידת הניקוד המוצגת (במקום מטבע). */
+export const POINTS_UNIT = "נק'";
+
+/** נקודות עם פסיקים, בלי שברים: 487,577 נק' */
 export function formatILS(amount: number): string {
   const rounded = Math.round(amount);
-  if (rounded < 0) return `-₪${ilsWhole.format(Math.abs(rounded))}`;
-  return `₪${ilsWhole.format(rounded)}`;
+  const sign = rounded < 0 ? "-" : "";
+  return `${sign}${ilsWhole.format(Math.abs(rounded))} ${POINTS_UNIT}`;
 }
 
-/** סכום חתום לרווח/הפסד: ‎+₪1,234 / ‎-₪1,234 */
+/** נקודות חתום לרווח/הפסד: ‎+1,234 נק' / ‎-1,234 נק' */
 export function formatILSSigned(amount: number): string {
   const rounded = Math.round(amount);
   const sign = rounded > 0 ? "+" : rounded < 0 ? "-" : "";
-  return `${sign}₪${ilsWhole.format(Math.abs(rounded))}`;
+  return `${sign}${ilsWhole.format(Math.abs(rounded))} ${POINTS_UNIT}`;
 }
 
-/** סכום ממוצע בלי מינוס, ספרה אחת אחרי הנקודה: ₪52.5 */
+/** ממוצע נקודות בלי מינוס, ספרה אחת אחרי הנקודה: 52.5 נק' */
 export function formatILSAvg(amount: number, digits = 1): string {
   const abs = Math.abs(amount);
   const formatted = new Intl.NumberFormat("he-IL", {
     minimumFractionDigits: 0,
     maximumFractionDigits: digits,
   }).format(abs);
-  return `₪${formatted}`;
+  return `${formatted} ${POINTS_UNIT}`;
 }
 
 /** מספר עשרוני עם ספרה אחת או שתיים לפי הצורך. */

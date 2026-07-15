@@ -44,12 +44,22 @@ export default async function DashboardPage({
     ? "כל התקופה בקובץ"
     : `מתאריך ${formatYmdDisplay(range.from)} ועד ${formatYmdDisplay(range.to)}`;
 
-  const winners = topWinners(stats.players);
-  const avgLosses = topAvgLoss(stats.players);
-  const attendance = topAttendance(stats.players);
-  const avgEntries = topAvgEntries(stats.players);
-  const avgNet = topAvgNet(stats.players);
+  // מציגים בדירוגים רק שחקנים עם 10 משחקים ומעלה (הסתרת מזדמנים)
+  const MIN_GAMES = 10;
+  const rankedPlayers = stats.players.filter((p) => p.gamesAttended >= MIN_GAMES);
+
+  const winners = topWinners(rankedPlayers);
+  const avgLosses = topAvgLoss(rankedPlayers);
+  const attendance = topAttendance(rankedPlayers);
+  const avgEntries = topAvgEntries(rankedPlayers);
+  const avgNet = topAvgNet(rankedPlayers);
   const popularDays = popularWeekdays(stats.weekdayGameCounts);
+
+  const topWinner = rankedPlayers.length > 0 ? rankedPlayers[0] : null;
+  const attendanceChampion = rankedPlayers.reduce<(typeof rankedPlayers)[number] | null>(
+    (best, p) => (best === null || p.gamesAttended > best.gamesAttended ? p : best),
+    null
+  );
 
   return (
     <PokerLayout active="/dashboard">
@@ -59,7 +69,7 @@ export default async function DashboardPage({
           <span className="text-poker-cream/80">♠</span>
           <span className="text-red-400/90">♥</span>
           <h1 className="mx-2 text-3xl font-extrabold text-white drop-shadow-lg sm:text-5xl">
-            פוקר שכונתי – סיכום משחקים
+            רמי שכונתי – סיכום משחקים
           </h1>
           <span className="text-red-400/90">♦</span>
           <span className="text-poker-cream/80">♣</span>
@@ -138,7 +148,7 @@ export default async function DashboardPage({
             </div>
             <div className="mt-4">
               <FullRankingPanel
-                players={stats.players.map((p) => ({
+                players={rankedPlayers.map((p) => ({
                   playerKey: p.playerKey,
                   playerName: p.playerName,
                   net: p.net,
@@ -155,20 +165,20 @@ export default async function DashboardPage({
               סטטיסטיקות מעניינות
             </h2>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {stats.topWinner && stats.topWinner.net > 0 ? (
+              {topWinner && topWinner.net > 0 ? (
                 <InterestingStatCard
                   icon="🏆"
                   title="הזוכה הגדול"
-                  name={stats.topWinner.playerName}
-                  value={formatILSSigned(stats.topWinner.net)}
+                  name={topWinner.playerName}
+                  value={formatILSSigned(topWinner.net)}
                 />
               ) : null}
-              {stats.attendanceChampion ? (
+              {attendanceChampion ? (
                 <InterestingStatCard
                   icon="👥"
                   title="שיאן נוכחות"
-                  name={stats.attendanceChampion.playerName}
-                  value={`${formatInt(stats.attendanceChampion.gamesAttended)} משחקים`}
+                  name={attendanceChampion.playerName}
+                  value={`${formatInt(attendanceChampion.gamesAttended)} משחקים`}
                 />
               ) : null}
               {stats.bestAvgNetPerGame ? (

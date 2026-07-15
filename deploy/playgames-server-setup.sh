@@ -48,6 +48,9 @@ Environment=PORT=${PORT}
 Environment=HOSTNAME=127.0.0.1
 Environment=NEXT_PUBLIC_BASE_PATH=/playgames
 Environment=DATABASE_URL=file:${DATA_DIR}/prod.db
+# פרטי ההתחברות (PLAYGAMES_USER / PLAYGAMES_PASSWORD) — קובץ אופציונלי שנכתב
+# בנפרד מחוץ לריפו הציבורי. אם חסר, השער כבוי (ה־'-' מונע כשל).
+EnvironmentFile=-/etc/playgames/credentials
 ExecStart=/usr/bin/env node server.js
 Restart=always
 RestartSec=3

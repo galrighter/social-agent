@@ -19,7 +19,7 @@ export default function KpiCard({
       </div>
       <div className="min-w-0 flex-1">
         {/* בלי truncate — המספר המלא תמיד נראה, כולל בנייד */}
-        <div className="text-xl font-extrabold leading-tight text-poker-text [font-variant-numeric:tabular-nums] sm:text-3xl">
+        <div className="text-lg font-extrabold leading-tight text-poker-text [font-variant-numeric:tabular-nums] sm:text-3xl">
           {value}
         </div>
         <div className="text-xs font-semibold leading-tight text-poker-text/60 sm:text-sm">
