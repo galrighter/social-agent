@@ -34,11 +34,10 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; softMode?: string }>;
+  searchParams: Promise<{ from?: string; to?: string }>;
 }) {
   const params = await searchParams;
   const { range, allTime } = resolveRange(params.from, params.to);
-  const softMode = params.softMode !== "false";
   const [stats, hasData] = await Promise.all([statsForRange(range), hasAnyTransactions()]);
 
   const subtitle = allTime
@@ -146,7 +145,6 @@ export default async function DashboardPage({
                   gamesAttended: p.gamesAttended,
                   entriesCount: p.entriesCount,
                 }))}
-                softMode={softMode}
               />
             </div>
           </section>
