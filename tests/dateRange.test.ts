@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   defaultRange,
   previousMonthRange,
+  rangeToBounds,
   rangeToDates,
   resolveRange,
   yearToDateRange,
@@ -50,5 +51,16 @@ describe("טווח תאריכים ברירת מחדל (Asia/Jerusalem)", () => {
     const { fromDate, toDate } = rangeToDates({ from: "2026-07-01", to: "2026-07-14" });
     expect(fromDate.toISOString()).toBe("2026-07-01T00:00:00.000Z");
     expect(toDate.toISOString()).toBe("2026-07-14T23:59:59.999Z");
+  });
+
+  it("rangeToBounds: [from 00:00, exclusive start-of-next-day)", () => {
+    const { fromDate, toExclusive } = rangeToBounds({ from: "2026-07-01", to: "2026-07-15" });
+    expect(fromDate.toISOString()).toBe("2026-07-01T00:00:00.000Z");
+    expect(toExclusive.toISOString()).toBe("2026-07-16T00:00:00.000Z");
+  });
+
+  it("rangeToBounds: to בסוף חודש גולש נכון לחודש הבא", () => {
+    const { toExclusive } = rangeToBounds({ from: "2026-07-01", to: "2026-07-31" });
+    expect(toExclusive.toISOString()).toBe("2026-08-01T00:00:00.000Z");
   });
 });

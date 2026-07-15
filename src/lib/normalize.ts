@@ -4,6 +4,19 @@ export function normalizeName(name: string | null | undefined): string {
   return String(name).trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+/**
+ * מפתח שחקן לחישובי סטטיסטיקות — שם מנורמל בלבד.
+ * חשוב: אסור להשתמש בטלפון כמזהה שחקן. בשורות redeem עמודת "פלאפון" אינה
+ * מזהה אמין (כל שורות ה־redeem עשויות לחלוק אותו מספר), ולכן זיהוי לפי טלפון
+ * ישייך את כל הזכיות לשחקן שגוי. השם מהאקסל הוא המזהה היחיד לחישובים.
+ */
+export function normalizePlayerName(name: string | null | undefined): string {
+  return String(name ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLocaleLowerCase("he-IL");
+}
+
 /** נרמול טלפון: ספרות בלבד, קידומת בינלאומית 972 מומרת ל־0. */
 export function normalizePhone(phone: string | number | null | undefined): string {
   if (phone === null || phone === undefined) return "";

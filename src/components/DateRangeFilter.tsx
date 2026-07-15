@@ -128,6 +128,7 @@ export default function DateRangeFilter({
           </button>
         </form>
       ) : null}
+      <p className="mt-2 text-xs text-poker-cream/50">הסינון מתבצע לפי תאריך תחילת המשחק.</p>
     </div>
   );
 }

@@ -1,17 +1,39 @@
+import { normalizePlayerName } from "./normalize";
+
 export const ENTRY_FEE = 25;
 export const GAME_GAP_HOURS = 12;
+const MIN_GAMES_FOR_AVG = 10;
 
-export interface StatsTx {
-  playerKey: string;
+/** עסקה בודדת כפי שהיא נכנסת למנוע הסטטיסטיקות. */
+export type TransactionForStats = {
+  id: string;
   playerName: string;
-  type: string; // payment | redeem | unknown
+  playerKey?: string; // metadata בלבד — לא בשימוש לחישובים
+  phone?: string | null; // metadata בלבד — לא בשימוש לחישובים
+  type: "payment" | "redeem" | "unknown" | string;
+  rawAmount: number;
   effectiveAmount: number;
   occurredAt: Date;
-  excludedFromStats: boolean;
-}
+  excludedFromStats?: boolean;
+};
 
+/** משחק כפי שנבנה מאשכולות תשלומי הכניסה. */
+export type GameForStats = {
+  id: string;
+  startAt: Date;
+  endAt: Date;
+  nextStartAt: Date | null;
+  paymentTransactionIds: string[];
+  transactionIds: string[]; // כולל redeem לאחר שיוך
+  totalPayments: number;
+  entriesCount: number;
+  playersCount: number;
+};
+
+/** תצוגת משחק לדשבורד (השם ההיסטורי — נשמר לתאימות קומפוננטות). */
 export interface Game {
   index: number;
+  id: string;
   startAt: Date;
   endAt: Date;
   players: number;
@@ -21,7 +43,7 @@ export interface Game {
 }
 
 export interface PlayerStats {
-  playerKey: string;
+  playerKey: string; // שם מנורמל — המזהה לחישובים
   playerName: string;
   paid: number;
   received: number;
@@ -61,95 +83,206 @@ export interface DashboardStats {
   potOverTime: { label: string; averagePot: number }[];
 }
 
-const MIN_GAMES_FOR_AVG = 10;
-
 /**
- * זיהוי משחקים לפי אשכולות של תשלומי כניסה:
- * פער של יותר מ־12 שעות בין תשלום לתשלום פותח משחק חדש.
+ * בניית משחקים מכל העסקאות — לפי אשכולות של תשלומי כניסה בלבד.
+ * פער של יותר מ־12 שעות בין payment ל־payment פותח משחק חדש.
+ * redeem אינו פותח משחק ואינו משפיע על startAt/endAt.
  */
-export function clusterGames(payments: StatsTx[]): Game[] {
-  const sorted = [...payments].sort(
-    (a, b) => a.occurredAt.getTime() - b.occurredAt.getTime()
-  );
-  const games: Game[] = [];
-  let current: StatsTx[] = [];
+export function buildGamesFromTransactions(
+  transactions: TransactionForStats[]
+): GameForStats[] {
+  const payments = transactions
+    .filter((t) => !t.excludedFromStats && t.type === "payment" && t.effectiveAmount > 0)
+    .sort((a, b) => a.occurredAt.getTime() - b.occurredAt.getTime());
+
+  const games: GameForStats[] = [];
+  let cluster: TransactionForStats[] = [];
+  const gapMs = GAME_GAP_HOURS * 3600 * 1000;
 
   const flush = () => {
-    if (current.length === 0) return;
-    const keys = new Set(current.map((t) => t.playerKey));
-    const total = current.reduce((sum, t) => sum + t.effectiveAmount, 0);
+    if (cluster.length === 0) return;
+    const startAt = cluster[0].occurredAt;
+    const endAt = cluster[cluster.length - 1].occurredAt;
+    const totalPayments = cluster.reduce((s, t) => s + t.effectiveAmount, 0);
+    const playerKeys = new Set(cluster.map((t) => normalizePlayerName(t.playerName)));
     games.push({
-      index: games.length + 1,
-      startAt: current[0].occurredAt,
-      endAt: current[current.length - 1].occurredAt,
-      players: keys.size,
-      playerKeys: [...keys],
-      totalEntriesAmount: total,
-      entriesCount: total / ENTRY_FEE,
+      id: `game-${startAt.toISOString()}`,
+      startAt,
+      endAt,
+      nextStartAt: null,
+      paymentTransactionIds: cluster.map((t) => t.id),
+      transactionIds: cluster.map((t) => t.id),
+      totalPayments,
+      entriesCount: totalPayments / ENTRY_FEE,
+      playersCount: playerKeys.size,
     });
-    current = [];
+    cluster = [];
   };
 
-  const gapMs = GAME_GAP_HOURS * 3600 * 1000;
-  for (const tx of sorted) {
+  for (const p of payments) {
     if (
-      current.length > 0 &&
-      tx.occurredAt.getTime() - current[current.length - 1].occurredAt.getTime() > gapMs
+      cluster.length > 0 &&
+      p.occurredAt.getTime() - cluster[cluster.length - 1].occurredAt.getTime() > gapMs
     ) {
       flush();
     }
-    current.push(tx);
+    cluster.push(p);
   }
   flush();
 
+  for (let i = 0; i < games.length; i++) {
+    games[i].nextStartAt = i + 1 < games.length ? games[i + 1].startAt : null;
+  }
   return games;
+}
+
+/**
+ * שיוך כל עסקה למשחק הנכון.
+ * עסקה שייכת למשחק G אם: G.startAt <= t.occurredAt וגם
+ * (G.nextStartAt === null או t.occurredAt < G.nextStartAt).
+ * כך redeem שנרשם אחרי חצות משויך למשחק שהתחיל בערב, ולא נספר בטעות למשחק הבא.
+ */
+export function assignTransactionsToGames(
+  transactions: TransactionForStats[],
+  games: GameForStats[]
+): {
+  games: GameForStats[];
+  transactionGameMap: Map<string, string>;
+  unassignedTransactionIds: string[];
+} {
+  const active = transactions.filter((t) => !t.excludedFromStats);
+  const sortedGames = [...games].sort((a, b) => a.startAt.getTime() - b.startAt.getTime());
+  const transactionGameMap = new Map<string, string>();
+  const unassignedTransactionIds: string[] = [];
+  const idsByGame = new Map<string, string[]>();
+  for (const g of sortedGames) idsByGame.set(g.id, []);
+
+  for (const t of active) {
+    const ts = t.occurredAt.getTime();
+    let assigned: GameForStats | null = null;
+    for (const g of sortedGames) {
+      const startsBeforeOrAt = g.startAt.getTime() <= ts;
+      const beforeNext = g.nextStartAt === null || ts < g.nextStartAt.getTime();
+      if (startsBeforeOrAt && beforeNext) {
+        assigned = g;
+        break;
+      }
+    }
+    if (assigned) {
+      transactionGameMap.set(t.id, assigned.id);
+      idsByGame.get(assigned.id)!.push(t.id);
+    } else {
+      // עסקה לפני המשחק הראשון ואין משחק קודם — נשארת ללא שיוך (לא נכנסת לחישוב)
+      unassignedTransactionIds.push(t.id);
+    }
+  }
+
+  const outGames = sortedGames.map((g) => ({
+    ...g,
+    transactionIds: idsByGame.get(g.id) ?? [],
+  }));
+  return { games: outGames, transactionGameMap, unassignedTransactionIds };
 }
 
 function monthKey(date: Date): string {
   return date.toISOString().slice(0, 7);
 }
 
-/** חישוב כל סטטיסטיקות הדשבורד עבור עסקאות שכבר סוננו לטווח התאריכים. */
-export function computeStats(transactions: StatsTx[]): DashboardStats {
+function toDisplayGame(g: GameForStats, index: number, playerKeys: string[]): Game {
+  return {
+    index,
+    id: g.id,
+    startAt: g.startAt,
+    endAt: g.endAt,
+    players: g.playersCount,
+    playerKeys,
+    totalEntriesAmount: g.totalPayments,
+    entriesCount: g.entriesCount,
+  };
+}
+
+/**
+ * מנוע הדשבורד: מקבל את *כל* העסקאות (אחרי החלת תיקונים והחרגות) וגבולות טווח
+ * חצי־פתוחים [fromDate, toExclusive), ומחזיר סטטיסטיקות המחושבות אך ורק ממשחקים
+ * שהתחילו בתוך הטווח והעסקאות המשויכות אליהם.
+ */
+export function computeDashboardStats(
+  transactions: TransactionForStats[],
+  bounds: { fromDate: Date; toExclusive: Date }
+): DashboardStats {
   const active = transactions.filter((t) => !t.excludedFromStats);
-  const payments = active.filter((t) => t.type === "payment" && t.effectiveAmount > 0);
-  const redeems = active.filter((t) => t.effectiveAmount < 0);
+  const byId = new Map(active.map((t) => [t.id, t]));
 
-  const totalPayments = payments.reduce((s, t) => s + t.effectiveAmount, 0);
-  const totalRedeems = Math.abs(redeems.reduce((s, t) => s + t.effectiveAmount, 0));
-  const accountingDiff = Math.abs(totalRedeems - totalPayments);
+  const allGames = buildGamesFromTransactions(active);
+  const { games: assignedGames, transactionGameMap } = assignTransactionsToGames(
+    active,
+    allGames
+  );
 
-  const games = clusterGames(payments);
-  const gamesCount = games.length;
+  // סינון לפי תאריך תחילת המשחק — לא לפי occurredAt של השורה
+  const fromMs = bounds.fromDate.getTime();
+  const toMs = bounds.toExclusive.getTime();
+  const selectedGames = assignedGames.filter(
+    (g) => g.startAt.getTime() >= fromMs && g.startAt.getTime() < toMs
+  );
+  const selectedGameIds = new Set(selectedGames.map((g) => g.id));
 
-  // לפי שחקן
-  const byPlayer = new Map<
-    string,
-    { name: string; paid: number; received: number; gameIndexes: Set<number> }
-  >();
-  const ensure = (t: StatsTx) => {
-    let entry = byPlayer.get(t.playerKey);
+  const selectedTransactions = active.filter((t) => {
+    const gameId = transactionGameMap.get(t.id);
+    return gameId !== undefined && selectedGameIds.has(gameId);
+  });
+
+  // כללי
+  const totalPayments = selectedTransactions.reduce(
+    (s, t) => s + (t.effectiveAmount > 0 ? t.effectiveAmount : 0),
+    0
+  );
+  const totalRedeems = Math.abs(
+    selectedTransactions.reduce(
+      (s, t) => s + (t.effectiveAmount < 0 ? t.effectiveAmount : 0),
+      0
+    )
+  );
+  const accountingDiff = Math.abs(totalPayments - totalRedeems);
+  const gamesCount = selectedGames.length;
+
+  // לפי שחקן — תמיד לפי שם מנורמל
+  type Agg = { name: string; paid: number; received: number; attended: Set<string> };
+  const byPlayer = new Map<string, Agg>();
+  const ensure = (name: string): Agg => {
+    const key = normalizePlayerName(name);
+    let entry = byPlayer.get(key);
     if (!entry) {
-      entry = { name: t.playerName, paid: 0, received: 0, gameIndexes: new Set() };
-      byPlayer.set(t.playerKey, entry);
+      entry = { name, paid: 0, received: 0, attended: new Set() };
+      byPlayer.set(key, entry);
     }
     return entry;
   };
-  for (const t of active) {
-    const entry = ensure(t);
+
+  for (const t of selectedTransactions) {
+    const entry = ensure(t.playerName);
     if (t.effectiveAmount > 0) entry.paid += t.effectiveAmount;
     else if (t.effectiveAmount < 0) entry.received += Math.abs(t.effectiveAmount);
   }
-  for (const game of games) {
-    for (const key of game.playerKeys) {
+
+  // gamesAttended — לפי payment בלבד: שחקן השתתף במשחק רק אם שילם בו
+  const gamePaymentKeys = new Map<string, string[]>();
+  for (const g of selectedGames) {
+    const keys: string[] = [];
+    for (const txId of g.paymentTransactionIds) {
+      const tx = byId.get(txId);
+      if (!tx) continue;
+      const key = normalizePlayerName(tx.playerName);
+      keys.push(key);
       const entry = byPlayer.get(key);
-      if (entry) entry.gameIndexes.add(game.index);
+      if (entry) entry.attended.add(g.id);
     }
+    gamePaymentKeys.set(g.id, keys);
   }
 
   const players: PlayerStats[] = [...byPlayer.entries()].map(([key, p]) => {
     const net = p.received - p.paid;
-    const gamesAttended = p.gameIndexes.size;
+    const gamesAttended = p.attended.size;
     const entriesCount = p.paid / ENTRY_FEE;
     return {
       playerKey: key,
@@ -161,23 +294,25 @@ export function computeStats(transactions: StatsTx[]): DashboardStats {
       entriesCount,
       avgEntriesPerGame: gamesAttended > 0 ? entriesCount / gamesAttended : 0,
       avgNetPerGame: gamesAttended > 0 ? net / gamesAttended : 0,
-      avgLossPerGame:
-        net < 0 && gamesAttended > 0 ? Math.abs(net) / gamesAttended : null,
+      avgLossPerGame: net < 0 && gamesAttended > 0 ? Math.abs(net) / gamesAttended : null,
     };
   });
   players.sort((a, b) => b.net - a.net);
 
-  // לפי חודש
+  // playersCount — שחקנים ייחודיים עם לפחות payment אחד בטווח
+  const playersCount = players.filter((p) => p.paid > 0).length;
+
+  // תצוגת משחקים
+  const displayGames = selectedGames.map((g, i) =>
+    toDisplayGame(g, i + 1, gamePaymentKeys.get(g.id) ?? [])
+  );
+
+  // לפי חודש (לפי תאריך תחילת המשחק)
   const monthMap = new Map<string, MonthStats>();
-  for (const t of payments) {
-    const key = monthKey(t.occurredAt);
-    const m = monthMap.get(key) ?? { month: key, totalEntriesAmount: 0, gamesCount: 0 };
-    m.totalEntriesAmount += t.effectiveAmount;
-    monthMap.set(key, m);
-  }
-  for (const g of games) {
+  for (const g of selectedGames) {
     const key = monthKey(g.startAt);
     const m = monthMap.get(key) ?? { month: key, totalEntriesAmount: 0, gamesCount: 0 };
+    m.totalEntriesAmount += g.totalPayments;
     m.gamesCount += 1;
     monthMap.set(key, m);
   }
@@ -185,10 +320,11 @@ export function computeStats(transactions: StatsTx[]): DashboardStats {
 
   // ימי שבוע (UTC — הזמנים נשמרים כשעון קיר)
   const weekdayGameCounts = new Array(7).fill(0) as number[];
-  for (const g of games) weekdayGameCounts[g.startAt.getUTCDay()]++;
+  for (const g of selectedGames) weekdayGameCounts[g.startAt.getUTCDay()]++;
 
-  const biggestGame = games.reduce<Game | null>(
-    (best, g) => (best === null || g.totalEntriesAmount > best.totalEntriesAmount ? g : best),
+  const biggestGame = displayGames.reduce<Game | null>(
+    (best, g) =>
+      best === null || g.totalEntriesAmount > best.totalEntriesAmount ? g : best,
     null
   );
   const hottestMonth = months.reduce<MonthStats | null>(
@@ -198,7 +334,7 @@ export function computeStats(transactions: StatsTx[]): DashboardStats {
   );
 
   const experienced = players.filter((p) => p.gamesAttended >= MIN_GAMES_FOR_AVG);
-  const topWinner = players.length > 0 && players[0].net > 0 ? players[0] : players[0] ?? null;
+  const topWinner = players.length > 0 ? players[0] : null;
   const attendanceChampion = players.reduce<PlayerStats | null>(
     (best, p) => (best === null || p.gamesAttended > best.gamesAttended ? p : best),
     null
@@ -221,14 +357,16 @@ export function computeStats(transactions: StatsTx[]): DashboardStats {
     totalPayments,
     totalRedeems,
     accountingDiff,
-    playersCount: byPlayer.size,
+    playersCount,
     gamesCount,
     averagePot: gamesCount > 0 ? totalPayments / gamesCount : 0,
     averagePlayersPerGame:
-      gamesCount > 0 ? games.reduce((s, g) => s + g.players, 0) / gamesCount : 0,
+      gamesCount > 0
+        ? selectedGames.reduce((s, g) => s + g.playersCount, 0) / gamesCount
+        : 0,
     averageEntriesPerGame: gamesCount > 0 ? totalPayments / ENTRY_FEE / gamesCount : 0,
     players,
-    games,
+    games: displayGames,
     months,
     weekdayGameCounts,
     biggestGame,
@@ -246,7 +384,10 @@ export function topWinners(players: PlayerStats[], n = 10): PlayerStats[] {
   return players.filter((p) => p.net > 0).slice(0, n);
 }
 
-/** Top N לפי ממוצע הפסד למשחק — מינימום משחקים כדי לא להקצין מדגם קטן. */
+/**
+ * Top N לפי ממוצע הפסד למשחק. כולל גם שחקנים עם הפסד כולל גדול —
+ * ההסתרה של מצב עדין חלה רק על הדירוג המלא, לא על הפאנל הזה.
+ */
 export function topAvgLoss(
   players: PlayerStats[],
   n = 10,
