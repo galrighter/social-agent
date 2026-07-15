@@ -9,11 +9,12 @@ name: Deploy playgames (poker dashboard)
 # Optional (defaults shown):
 #   HETZNER_HOST = 167.233.112.68
 #   HETZNER_USER = root
+# NOTE: the active deploy pipeline lives in powdercoat-site
+# (.github/workflows/deploy-playgames.yml there) because the Hetzner SSH key
+# secret exists in that repo. This copy is kept dispatch-only as a fallback for
+# the day the secret is added here.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 concurrency:
   group: deploy-playgames
