@@ -73,6 +73,22 @@ export function rangeToDates(range: DateRange): { fromDate: Date; toDate: Date }
   };
 }
 
+/**
+ * גבולות חצי־פתוחים לסינון משחקים: [fromDate, toExclusive).
+ * fromDate = from בשעה 00:00 (Asia/Jerusalem, נשמר כ־UTC).
+ * toExclusive = תחילת היום שאחרי to (00:00), כדי ש־to יהיה כולל־יום־מלא.
+ * הזמנים במסד הם שעון־קיר ישראלי מאוחסן כ־UTC — לכן הגבולות נבנים ב־UTC.
+ */
+export function rangeToBounds(range: DateRange): { fromDate: Date; toExclusive: Date } {
+  const [fy, fm, fd] = range.from.split("-").map(Number);
+  const [ty, tm, td] = range.to.split("-").map(Number);
+  return {
+    fromDate: new Date(Date.UTC(fy, fm - 1, fd, 0, 0, 0, 0)),
+    // td + 1 גולש נכון לחודש/שנה הבאים דרך Date.UTC
+    toExclusive: new Date(Date.UTC(ty, tm - 1, td + 1, 0, 0, 0, 0)),
+  };
+}
+
 /** פענוח query params — נופל חזרה לברירת המחדל אם הערכים חסרים/לא תקינים. */
 export function resolveRange(
   fromParam: string | null | undefined,
