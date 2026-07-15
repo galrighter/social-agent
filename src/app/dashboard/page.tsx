@@ -7,6 +7,7 @@ import InterestingStatCard from "@/components/InterestingStatCard";
 import MiniRankingPanel from "@/components/MiniRankingPanel";
 import DateRangeFilter from "@/components/DateRangeFilter";
 import DashboardCharts from "@/components/DashboardCharts";
+import { requireAuth } from "@/lib/auth";
 import { resolveRange } from "@/lib/dateRange";
 import { statsForRange, hasAnyTransactions } from "@/lib/statsService";
 import {
@@ -36,6 +37,7 @@ export default async function DashboardPage({
 }: {
   searchParams: Promise<{ from?: string; to?: string }>;
 }) {
+  await requireAuth();
   const params = await searchParams;
   const { range, allTime } = resolveRange(params.from, params.to);
   const [stats, hasData] = await Promise.all([statsForRange(range), hasAnyTransactions()]);
