@@ -188,6 +188,43 @@ function monthKey(date: Date): string {
   return date.toISOString().slice(0, 7);
 }
 
+/**
+ * מספר המשחקים שכל שחקן שיחק ב*כל התקופה* (לפי payment בלבד), ללא סינון טווח.
+ * משמש כדי לקבוע מיהם ה"קבועים" (10+ משחקים בסך הכול) — כך שהם יוצגו בכל טווח,
+ * ולא ייעלמו בטווח קצר שבו יש להם פחות מ־10 משחקים.
+ */
+export function allTimeGamesAttended(
+  transactions: TransactionForStats[]
+): Map<string, number> {
+  const active = transactions.filter((t) => !t.excludedFromStats);
+  const byId = new Map(active.map((t) => [t.id, t]));
+  const games = buildGamesFromTransactions(active);
+  const counts = new Map<string, number>();
+  for (const g of games) {
+    const seenInGame = new Set<string>();
+    for (const txId of g.paymentTransactionIds) {
+      const tx = byId.get(txId);
+      if (!tx) continue;
+      const key = normalizePlayerName(tx.playerName);
+      if (seenInGame.has(key)) continue; // משחק נספר פעם אחת לשחקן
+      seenInGame.add(key);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+/** קבוצת מפתחות השחקנים עם 10+ משחקים בכל התקופה. */
+export function regularPlayerKeys(
+  transactions: TransactionForStats[],
+  minGames = MIN_GAMES_FOR_AVG
+): Set<string> {
+  const counts = allTimeGamesAttended(transactions);
+  const keys = new Set<string>();
+  for (const [key, n] of counts) if (n >= minGames) keys.add(key);
+  return keys;
+}
+
 function toDisplayGame(g: GameForStats, index: number, playerKeys: string[]): Game {
   return {
     index,

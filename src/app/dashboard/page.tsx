@@ -40,21 +40,26 @@ export default async function DashboardPage({
   await requireAuth();
   const params = await searchParams;
   const { range, allTime } = resolveRange(params.from, params.to);
-  const [stats, hasData] = await Promise.all([statsForRange(range), hasAnyTransactions()]);
+  const [{ stats, regularKeys }, hasData] = await Promise.all([
+    statsForRange(range),
+    hasAnyTransactions(),
+  ]);
 
   const subtitle = allTime
     ? "כל התקופה בקובץ"
     : `מתאריך ${formatYmdDisplay(range.from)} ועד ${formatYmdDisplay(range.to)}`;
 
-  // מציגים בדירוגים רק שחקנים עם 10 משחקים ומעלה (הסתרת מזדמנים)
-  const MIN_GAMES = 10;
-  const rankedPlayers = stats.players.filter((p) => p.gamesAttended >= MIN_GAMES);
+  // מסתירים מזדמנים לפי מספר המשחקים ב*כל התקופה* — לא לפי הטווח שנבחר.
+  // כך שחקן קבוע (10+ משחקים בסך הכול) מוצג גם בטווח קצר שבו שיחק מעט משחקים.
+  const rankedPlayers = stats.players.filter((p) => regularKeys.has(p.playerKey));
 
+  // מכיוון שהזכאות כבר נקבעה לפי כל התקופה, בפאנלים אין להחיל שוב מינימום
+  // משחקים לפי הטווח — אחרת קבוע שהופיע מעט בטווח קצר ייעלם מהממוצעים.
   const winners = topWinners(rankedPlayers);
-  const avgLosses = topAvgLoss(rankedPlayers);
+  const avgLosses = topAvgLoss(rankedPlayers, 10, 1);
   const attendance = topAttendance(rankedPlayers);
-  const avgEntries = topAvgEntries(rankedPlayers);
-  const avgNet = topAvgNet(rankedPlayers);
+  const avgEntries = topAvgEntries(rankedPlayers, 5, 1);
+  const avgNet = topAvgNet(rankedPlayers, 5, 1);
   const popularDays = popularWeekdays(stats.weekdayGameCounts);
 
   const topWinner = rankedPlayers.length > 0 ? rankedPlayers[0] : null;
@@ -62,6 +67,10 @@ export default async function DashboardPage({
     (best, p) => (best === null || p.gamesAttended > best.gamesAttended ? p : best),
     null
   );
+  // הסטטיסטיקות המעניינות של ממוצעים — מתוך הקבועים (כל התקופה), לא מ־experienced
+  // של המנוע שמסונן לפי הטווח, כדי שלא ייעלמו בטווח קצר.
+  const bestAvgNetPlayer = avgNet.length > 0 ? avgNet[0] : null;
+  const mostAvgEntriesPlayer = avgEntries.length > 0 ? avgEntries[0] : null;
 
   return (
     <PokerLayout active="/dashboard">
@@ -183,22 +192,22 @@ export default async function DashboardPage({
                   value={`${formatInt(attendanceChampion.gamesAttended)} משחקים`}
                 />
               ) : null}
-              {stats.bestAvgNetPerGame ? (
+              {bestAvgNetPlayer ? (
                 <InterestingStatCard
                   icon="📈"
                   title="הממוצע הטוב ביותר למשחק"
-                  name={stats.bestAvgNetPerGame.playerName}
-                  value={formatILSSigned(stats.bestAvgNetPerGame.avgNetPerGame)}
-                  sub={`${formatInt(stats.bestAvgNetPerGame.gamesAttended)} משחקים`}
+                  name={bestAvgNetPlayer.playerName}
+                  value={formatILSSigned(bestAvgNetPlayer.avgNetPerGame)}
+                  sub={`${formatInt(bestAvgNetPlayer.gamesAttended)} משחקים`}
                 />
               ) : null}
-              {stats.mostAvgEntriesPerGame ? (
+              {mostAvgEntriesPlayer ? (
                 <InterestingStatCard
                   icon="🚪"
                   title="הכי הרבה כניסות בממוצע למשחק"
-                  name={stats.mostAvgEntriesPerGame.playerName}
-                  value={formatDecimal(stats.mostAvgEntriesPerGame.avgEntriesPerGame, 2)}
-                  sub={`${formatInt(stats.mostAvgEntriesPerGame.gamesAttended)} משחקים`}
+                  name={mostAvgEntriesPlayer.playerName}
+                  value={formatDecimal(mostAvgEntriesPlayer.avgEntriesPerGame, 2)}
+                  sub={`${formatInt(mostAvgEntriesPlayer.gamesAttended)} משחקים`}
                 />
               ) : null}
               {stats.hottestMonth ? (
@@ -268,7 +277,7 @@ export default async function DashboardPage({
 
           <DashboardCharts
             months={stats.months}
-            players={stats.players.map((p) => ({ playerName: p.playerName, net: p.net }))}
+            players={rankedPlayers.map((p) => ({ playerName: p.playerName, net: p.net }))}
             potOverTime={stats.potOverTime}
           />
         </>
