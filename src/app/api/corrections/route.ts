@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { ensureSeedCorrections, reapplyCorrectionsToAll } from "@/lib/importService";
+import { isAuthed } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function GET() {
+  if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   await ensureSeedCorrections();
   const corrections = await prisma.dataCorrection.findMany({
     orderBy: { createdAt: "asc" },
@@ -13,6 +15,7 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await request.json();
 
   // עדכון מצב פעיל/כבוי לתיקון קיים

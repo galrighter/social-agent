@@ -1,11 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { apiUrl } from "@/lib/basePath";
 
 export default function LoginClient() {
-  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -22,8 +20,8 @@ export default function LoginClient() {
         body: JSON.stringify({ username, password }),
       });
       if (res.ok) {
-        router.push("/dashboard");
-        router.refresh();
+        // ניווט מלא — מבטיח שהעוגייה נשלחת והדשבורד האמיתי נטען
+        window.location.assign(apiUrl("/dashboard"));
       } else {
         const data = await res.json().catch(() => ({}));
         setError(data.error ?? "ההתחברות נכשלה");

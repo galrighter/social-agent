@@ -1,9 +1,11 @@
 import PokerLayout from "@/components/PokerLayout";
+import { requireAuth } from "@/lib/auth";
 import DataClient from "./DataClient";
 
 export const dynamic = "force-dynamic";
 
-export default function DataPage() {
+export default async function DataPage() {
+  await requireAuth();
   return (
     <PokerLayout active="/data">
       <header className="mb-6 text-center">

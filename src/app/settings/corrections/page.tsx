@@ -1,9 +1,11 @@
 import PokerLayout from "@/components/PokerLayout";
+import { requireAuth } from "@/lib/auth";
 import CorrectionsClient from "./CorrectionsClient";
 
 export const dynamic = "force-dynamic";
 
-export default function CorrectionsPage() {
+export default async function CorrectionsPage() {
+  await requireAuth();
   return (
     <PokerLayout active="/settings/corrections">
       <header className="mb-6 text-center">

@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
+import { isAuthed } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
+  if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const params = request.nextUrl.searchParams;
   const search = params.get("search")?.trim();
   const type = params.get("type")?.trim();

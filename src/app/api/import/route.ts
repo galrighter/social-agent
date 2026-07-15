@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { importExcelBuffer } from "@/lib/importService";
+import { isAuthed } from "@/lib/auth";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  if (!(await isAuthed())) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
     const formData = await request.formData();
     const file = formData.get("file");

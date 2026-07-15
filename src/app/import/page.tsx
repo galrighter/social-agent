@@ -1,9 +1,11 @@
 import PokerLayout from "@/components/PokerLayout";
+import { requireAuth } from "@/lib/auth";
 import ImportClient from "./ImportClient";
 
 export const dynamic = "force-dynamic";
 
-export default function ImportPage() {
+export default async function ImportPage() {
+  await requireAuth();
   return (
     <PokerLayout active="/import">
       <header className="mb-6 text-center">
