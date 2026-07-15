@@ -10,8 +10,7 @@ export async function GET(request: NextRequest) {
     params.get("from"),
     params.get("to")
   );
-  const softMode = params.get("softMode") !== "false";
   const stats = await statsForRange(range);
 
-  return NextResponse.json({ range, isDefault, allTime, softMode, stats });
+  return NextResponse.json({ range, isDefault, allTime, stats });
 }
