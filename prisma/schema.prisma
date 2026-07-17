@@ -24,6 +24,7 @@ model Transaction {
   sourceFileName    String
   importBatchId     String
   excludedFromStats Boolean  @default(false)
+  dedupeExcluded    Boolean  @default(false)
   createdAt         DateTime @default(now())
 
   importBatch ImportBatch @relation(fields: [importBatchId], references: [id])

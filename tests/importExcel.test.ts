@@ -39,25 +39,25 @@ describe("ייבוא Excel", () => {
 
   it("ייבוא אותו קובץ פעמיים לא מכפיל שורות", () => {
     const buffer = makeWorkbookBuffer(SAMPLE_ROWS);
-    const persistedHashes = new Set<string>(); // מדמה את מסד הנתונים
+    const persisted = new Set<string>(); // מדמה את מסד הנתונים (מפתחות-זהות)
 
     const first = parseWorkbook(buffer);
-    const firstPlan = planImport(first.rows, persistedHashes);
+    const firstPlan = planImport(first.rows, persisted);
     expect(firstPlan.toInsert).toHaveLength(3);
     expect(firstPlan.skippedDuplicates).toBe(0);
-    for (const row of firstPlan.toInsert) persistedHashes.add(row.rowHash);
+    for (const row of firstPlan.toInsert) persisted.add(row.identityKey);
 
     const second = parseWorkbook(buffer);
-    const secondPlan = planImport(second.rows, persistedHashes);
+    const secondPlan = planImport(second.rows, persisted);
     expect(secondPlan.toInsert).toHaveLength(0);
     expect(secondPlan.skippedDuplicates).toBe(3);
   });
 
   it("קובץ חדש עם שורות ישנות וחדשות — רק החדשות נוספות", () => {
-    const persistedHashes = new Set<string>();
+    const persisted = new Set<string>();
     const first = parseWorkbook(makeWorkbookBuffer(SAMPLE_ROWS));
-    for (const row of planImport(first.rows, persistedHashes).toInsert) {
-      persistedHashes.add(row.rowHash);
+    for (const row of planImport(first.rows, persisted).toInsert) {
+      persisted.add(row.identityKey);
     }
 
     const withNewRow = [
@@ -65,10 +65,44 @@ describe("ייבוא Excel", () => {
       { שם: "יוסי לוי", פלאפון: "0541112222", סוג: "payment", סכום: 25, תאריך: "2024-03-30 21:00:00" },
     ];
     const second = parseWorkbook(makeWorkbookBuffer(withNewRow));
-    const plan = planImport(second.rows, persistedHashes);
+    const plan = planImport(second.rows, persisted);
     expect(plan.toInsert).toHaveLength(1);
     expect(plan.toInsert[0].playerName).toBe("יוסי לוי");
     expect(plan.skippedDuplicates).toBe(3);
+  });
+
+  it("אותה עסקה עם הערה שונה (או ריקה) מזוהה ככפילות — לא נכנסת פעמיים", () => {
+    // שחזור הבאג האמיתי: יצוא אחד עם הערה ריקה, השני עם הערה — אותה עסקה בדיוק.
+    const persisted = new Set<string>();
+    const fileA = parseWorkbook(
+      makeWorkbookBuffer([
+        { שם: "Lidor Horovitz", פלאפון: "0544639305", סוג: "payment", סכום: 25, תאריך: "2026-06-30 22:44:40", הערות: "" },
+      ])
+    );
+    for (const row of planImport(fileA.rows, persisted).toInsert) {
+      persisted.add(row.identityKey);
+    }
+
+    const fileB = parseWorkbook(
+      makeWorkbookBuffer([
+        { שם: "Lidor Horovitz", פלאפון: "0544639305", סוג: "payment", סכום: 25, תאריך: "2026-06-30 22:44:40", הערות: "4" },
+      ])
+    );
+    const plan = planImport(fileB.rows, persisted);
+    expect(plan.toInsert).toHaveLength(0);
+    expect(plan.skippedDuplicates).toBe(1);
+  });
+
+  it("שתי שורות זהות בקובץ אחד הנבדלות רק בהערה — נספרות פעם אחת", () => {
+    const parsed = parseWorkbook(
+      makeWorkbookBuffer([
+        { שם: "דני", פלאפון: "0501112222", סוג: "payment", סכום: 25, תאריך: "2026-06-30 22:00:00", הערות: "" },
+        { שם: "דני", פלאפון: "0501112222", סוג: "payment", סכום: 25, תאריך: "2026-06-30 22:00:00", הערות: "ריביי" },
+      ])
+    );
+    const plan = planImport(parsed.rows, new Set<string>());
+    expect(plan.toInsert).toHaveLength(1);
+    expect(plan.skippedDuplicates).toBe(1);
   });
 
   it("rowHash יציב — אותה שורה תמיד מקבלת אותו hash", () => {
