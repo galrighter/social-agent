@@ -1,5 +1,5 @@
 import { prisma } from "./prisma";
-import { parseWorkbook, planImport } from "./importExcel";
+import { parseWorkbook, planImport, buildIdentityKey } from "./importExcel";
 import { applyCorrections, SEED_CORRECTIONS, type CorrectionRule } from "./corrections";
 
 export interface ImportSummary {
@@ -50,14 +50,20 @@ export async function importExcelBuffer(
 
   const parsed = parseWorkbook(buffer);
 
-  const hashes = parsed.rows.map((r) => r.rowHash);
+  // זיהוי כפילויות לפי מפתח-זהות (ללא הערות), לא לפי rowHash — כדי שיצוא חוזר
+  // של אותה עסקה עם הערה שונה/ריקה יזוהה ולא ייכנס פעמיים.
   const existing = await prisma.transaction.findMany({
-    where: { rowHash: { in: hashes } },
-    select: { rowHash: true },
+    select: {
+      playerName: true,
+      phone: true,
+      type: true,
+      rawAmount: true,
+      occurredAt: true,
+    },
   });
-  const existingHashes = new Set(existing.map((e) => e.rowHash));
+  const existingIdentityKeys = new Set(existing.map((e) => buildIdentityKey(e)));
 
-  const plan = planImport(parsed.rows, existingHashes);
+  const plan = planImport(parsed.rows, existingIdentityKeys);
 
   let correctionRows = 0;
   const rowsToCreate = plan.toInsert.map((row) => {
@@ -127,15 +133,18 @@ export async function reapplyCorrectionsToAll(): Promise<number> {
       },
       corrections
     );
+    // החרגת כפילות (dedupeExcluded) גוברת תמיד — reapply של תיקונים לעולם לא
+    // מבטל אותה, אחרת כפל-הספירה היה חוזר בשקט בהוספת/שינוי כל תיקון.
+    const targetExcluded = outcome.excludedFromStats || tx.dedupeExcluded;
     if (
       outcome.effectiveAmount !== tx.effectiveAmount ||
-      outcome.excludedFromStats !== tx.excludedFromStats
+      targetExcluded !== tx.excludedFromStats
     ) {
       await prisma.transaction.update({
         where: { id: tx.id },
         data: {
           effectiveAmount: outcome.effectiveAmount,
-          excludedFromStats: outcome.excludedFromStats,
+          excludedFromStats: targetExcluded,
         },
       });
       updated++;

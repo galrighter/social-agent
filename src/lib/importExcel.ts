@@ -14,6 +14,7 @@ export interface ParsedRow {
   rawDateText: string | null;
   notes: string | null;
   rowHash: string;
+  identityKey: string;
 }
 
 export interface ParseResult {
@@ -150,6 +151,28 @@ export function buildRowHash(input: {
   return createHash("sha256").update(parts, "utf8").digest("hex");
 }
 
+/**
+ * מפתח זהות של עסקה לצורך זיהוי כפילויות — שם מנורמל + טלפון מנורמל + סוג +
+ * סכום + תאריך ISO עד שנייה. **בכוונה אינו כולל את עמודת ההערות**: יצוא חוזר
+ * של אותו קובץ עשוי לכלול הערה שונה (או ריקה) לאותה עסקה בדיוק, וזה לא הופך
+ * אותה לעסקה חדשה. חיבור ההערות ל-hash הוא שגרם לאותה עסקה להיכנס פעמיים.
+ */
+export function buildIdentityKey(input: {
+  playerName: string;
+  phone: string | number | null | undefined;
+  type: TxType | string;
+  rawAmount: number;
+  occurredAt: Date;
+}): string {
+  return [
+    normalizeName(input.playerName),
+    normalizePhone(input.phone),
+    input.type,
+    String(input.rawAmount),
+    toIsoSecond(input.occurredAt),
+  ].join("|");
+}
+
 type RawRecord = Record<string, unknown>;
 
 function mapRecord(record: RawRecord): RawRecord {
@@ -226,6 +249,13 @@ export function parseWorkbook(buffer: Buffer | ArrayBuffer): ParseResult {
           occurredAt,
           notes,
         }),
+        identityKey: buildIdentityKey({
+          playerName: name,
+          phone: record.phone as string | number | null,
+          type,
+          rawAmount: amount,
+          occurredAt,
+        }),
       });
     }
   }
@@ -239,20 +269,24 @@ export interface ImportPlan {
 }
 
 /**
- * תכנון ייבוא מול hashes קיימים: שורה שכבר קיימת (או כפולה בתוך הקובץ)
- * מדולגת — לעולם לא מתעדכנת ולא נמחקת.
+ * תכנון ייבוא מול מפתחות-זהות קיימים: שורה שזהותה כבר קיימת (או חוזרת בתוך
+ * הקובץ) מדולגת — לעולם לא מתעדכנת ולא נמחקת. הזיהוי הוא לפי `identityKey`
+ * (ללא ההערות), כך שאותה עסקה ביצוא חוזר עם הערה שונה לא נכנסת פעמיים.
  */
-export function planImport(rows: ParsedRow[], existingHashes: Set<string>): ImportPlan {
+export function planImport(
+  rows: ParsedRow[],
+  existingIdentityKeys: Set<string>
+): ImportPlan {
   const toInsert: ParsedRow[] = [];
-  const seen = new Set(existingHashes);
+  const seen = new Set(existingIdentityKeys);
   let skippedDuplicates = 0;
 
   for (const row of rows) {
-    if (seen.has(row.rowHash)) {
+    if (seen.has(row.identityKey)) {
       skippedDuplicates++;
       continue;
     }
-    seen.add(row.rowHash);
+    seen.add(row.identityKey);
     toInsert.push(row);
   }
 
