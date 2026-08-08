@@ -20,6 +20,10 @@ interface BatchRow {
 interface ImportResponse extends ImportSummaryData {
   batchId: string;
   error?: string;
+  /** הקובץ מוגן בסיסמה — צריך לבקש מהמשתמש סיסמה ולנסות שוב. */
+  passwordRequired?: boolean;
+  /** הסיסמה שנשלחה שגויה (להבדיל מסיסמה שכלל לא נשלחה). */
+  wrongPassword?: boolean;
 }
 
 export default function ImportClient() {
@@ -28,7 +32,11 @@ export default function ImportClient() {
   const [summary, setSummary] = useState<ImportResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [batches, setBatches] = useState<BatchRow[]>([]);
+  // הקובץ המוגן ממתין בזיכרון הדפדפן עד שהמשתמש יזין סיסמה — כך אין צורך לבחור אותו מחדש.
+  const [lockedFile, setLockedFile] = useState<File | null>(null);
+  const [password, setPassword] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const passwordRef = useRef<HTMLInputElement>(null);
 
   const loadBatches = useCallback(async () => {
     try {
@@ -44,19 +52,29 @@ export default function ImportClient() {
   }, [loadBatches]);
 
   const upload = useCallback(
-    async (file: File) => {
+    async (file: File, filePassword?: string) => {
       setUploading(true);
       setError(null);
       setSummary(null);
       try {
         const formData = new FormData();
         formData.append("file", file);
+        if (filePassword) formData.append("password", filePassword);
         const res = await fetch(apiUrl("/api/import"), { method: "POST", body: formData });
         const data: ImportResponse = await res.json();
         if (!res.ok) {
           setError(data.error ?? "הייבוא נכשל");
+          if (data.passwordRequired) {
+            // שומרים את הקובץ ומציגים שדה סיסמה; סיסמה שגויה מתנקה כדי להזין מחדש.
+            setLockedFile(file);
+            setPassword("");
+          } else {
+            setLockedFile(null);
+          }
         } else {
           setSummary(data);
+          setLockedFile(null);
+          setPassword("");
           loadBatches();
         }
       } catch {
@@ -68,6 +86,17 @@ export default function ImportClient() {
     },
     [loadBatches]
   );
+
+  // מיקוד אוטומטי בשדה הסיסמה ברגע שמתברר שהקובץ מוגן.
+  useEffect(() => {
+    if (lockedFile) passwordRef.current?.focus();
+  }, [lockedFile]);
+
+  const cancelLocked = useCallback(() => {
+    setLockedFile(null);
+    setPassword("");
+    setError(null);
+  }, []);
 
   return (
     <div className="space-y-5">
@@ -93,6 +122,9 @@ export default function ImportClient() {
         <p className="text-xs text-poker-text/55">
           עמודות נתמכות: שם, פלאפון, סוג, סכום, תאריך, הערות (xlsx / xls)
         </p>
+        <p className="text-xs text-poker-text/45">
+          🔒 קובץ מוגן בסיסמה? העלה אותו כרגיל — נבקש את הסיסמה מיד לאחר מכן
+        </p>
         <label className="cursor-pointer rounded-lg bg-poker-green px-5 py-2 font-bold text-white transition hover:brightness-110">
           {uploading ? "מייבא…" : "בחירת קובץ"}
           <input
@@ -109,7 +141,57 @@ export default function ImportClient() {
         </label>
       </div>
 
-      {error ? (
+      {/* קובץ מוגן בסיסמה — הזנת הסיסמה וניסיון חוזר עם אותו קובץ */}
+      {lockedFile ? (
+        <form
+          className="poker-card space-y-3 p-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (password && !uploading) upload(lockedFile, password);
+          }}
+        >
+          <div className="text-center">
+            <p className="font-bold text-poker-text">🔒 הקובץ מוגן בסיסמה</p>
+            <p className="mt-1 text-xs text-poker-text/60" dir="ltr">
+              {lockedFile.name}
+            </p>
+            {error ? (
+              <p className="mt-2 text-sm font-bold text-poker-red">{error}</p>
+            ) : null}
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <input
+              ref={passwordRef}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={uploading}
+              autoComplete="off"
+              placeholder="סיסמת הקובץ"
+              aria-label="סיסמת הקובץ"
+              className="flex-1 rounded-lg border border-poker-goldBorder/60 bg-black/20 px-4 py-2 text-poker-text outline-none focus:border-poker-gold"
+            />
+            <button
+              type="submit"
+              disabled={uploading || !password}
+              className="rounded-lg bg-poker-green px-5 py-2 font-bold text-white transition hover:brightness-110 disabled:opacity-50"
+            >
+              {uploading ? "מייבא…" : "פתיחה וייבוא"}
+            </button>
+            <button
+              type="button"
+              onClick={cancelLocked}
+              disabled={uploading}
+              className="rounded-lg border border-poker-goldBorder/60 px-4 py-2 font-bold text-poker-text/70 transition hover:bg-poker-panel2 disabled:opacity-50"
+            >
+              ביטול
+            </button>
+          </div>
+          <p className="text-center text-xs text-poker-text/45">
+            הסיסמה משמשת לפתיחת הקובץ בלבד ואינה נשמרת
+          </p>
+        </form>
+      ) : error ? (
         <div className="poker-card border-poker-red/60 p-4 text-center font-bold text-poker-red">
           {error}
         </div>
