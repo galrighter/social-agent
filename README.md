@@ -16,12 +16,25 @@ NEXT_PUBLIC_BASE_PATH=/playgames npm run build
 
 ### פריסה לשרת (Hetzner)
 
-ה־workflow‏ `deploy-playgames.yml` נבנה, בודק ופורס אוטומטית בכל push ל־`main`
-(או ידנית דרך workflow_dispatch): build כ־standalone עם `basePath=/playgames`,
-‏rsync ל־`/opt/playgames/app`, מיגרציית Prisma על `/opt/playgames/data/prod.db`,
-והפעלה מחדש של שירות `playgames` (systemd, פורט 3017). ‏nginx בשרת מפנה את
+**הפריסה אינה אוטומטית, וה־workflow הפעיל אינו בריפו הזה.** הוא יושב ב־
+`galrighter/powdercoat-site` (‏`.github/workflows/deploy-playgames.yml`), כי
+secrets ב־GitHub הם per-repo ומפתח ה־SSH ל־Hetzner קיים שם. אותו workflow עושה
+checkout ל־`galrighter/social-agent` — השם הישן של הריפו הזה, שעדיין מפנה אליו —
+ולכן הוא בונה את הקוד שב־`main` כאן.
+
+מה שהוא עושה: build כ־standalone עם `basePath=/playgames`, ‏rsync ל־
+`/opt/playgames/app`, מיגרציית Prisma על `/opt/playgames/data/prod.db`, והפעלה
+מחדש של שירות `playgames` (systemd, פורט 3017). ‏nginx בשרת מפנה את
 `powdercoat.co.il/playgames` לאפליקציה (ה־include יושב ב־vhost של powdercoat-site).
-נדרש secret בשם `HETZNER_SSH_KEY` בריפו הזה.
+
+**איך פורסים:** קומיט ב־`powdercoat-site` שנוגע ב־`deploy/.playgames-trigger`
+על `main` (שורת תיאור + חותמת זמן — כך נעשו כל הפריסות), או הרצה ידנית של
+ה־workflow שם דרך workflow_dispatch. מיזוג ל־`main` בריפו הזה **לא** פורס כלום
+בפני עצמו.
+
+העותק של `deploy-playgames.yml` שבריפו הזה הוא fallback ליום שבו יתווסף כאן
+secret בשם `HETZNER_SSH_KEY` — הוא `workflow_dispatch` בלבד, וכל הרצותיו נכשלו
+בהיעדר המפתח.
 
 ## התקנה
 
